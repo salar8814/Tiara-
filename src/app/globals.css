@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("/fonts/Vazirmatn-Variable.woff2") format("woff2-variations"), url("/fonts/Vazirmatn-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Design tokens ──
+   Navy/indigo and terracotta come from the original Tiara mockups, deepened
+   and desaturated slightly; neutrals are warm instead of blue-grey so product
+   art carries the colour. */
+@theme {
+  --font-sans: "Vazirmatn", ui-sans-serif, system-ui, sans-serif;
+
+  --color-ink: #16172e;
+  --color-ink-soft: #3d3e57;
+  --color-muted: #6b6a78;
+  --color-subtle: #9796a2;
+  --color-canvas: #f6f5f2;
+  --color-surface: #ffffff;
+  --color-sunken: #efede8;
+  --color-line: #e6e3dc;
+  --color-line-strong: #d2cec5;
+
+  --color-indigo-50: #efeff8;
+  --color-indigo-100: #dfdef1;
+  --color-indigo-200: #c1bfe4;
+  --color-indigo-500: #4a47b3;
+  --color-indigo-600: #35329c;
+  --color-indigo-700: #29277f;
+  --color-indigo-800: #1f1d63;
+  --color-indigo-900: #15144a;
+
+  --color-clay-50: #fbf1eb;
+  --color-clay-100: #f5ded1;
+  --color-clay-200: #ecc3ad;
+  --color-clay-500: #c4663d;
+  --color-clay-600: #aa522c;
+  --color-clay-700: #8d4223;
+  --color-clay-800: #6f341c;
+
+  --color-success: #1d7553;
+  --color-success-soft: #e7f3ed;
+  --color-warning: #8f5c00;
+  --color-warning-soft: #fbf0d9;
+  --color-danger: #b3261e;
+  --color-danger-soft: #fbe9e7;
+  --color-info: #2b5a8c;
+  --color-info-soft: #e7eff8;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+
+  --shadow-card: 0 1px 2px rgb(22 23 46 / 0.04), 0 4px 16px -8px rgb(22 23 46 / 0.08);
+  --shadow-pop: 0 12px 40px -12px rgb(22 23 46 / 0.25);
+}
+
+/* Channel accent: B2C = indigo, B2B = clay. Components use `accent-*`. */
+@theme inline {
+  --color-accent-50: var(--acc-50);
+  --color-accent-100: var(--acc-100);
+  --color-accent-600: var(--acc-600);
+  --color-accent-700: var(--acc-700);
+  --color-accent-800: var(--acc-800);
+}
+
+:root {
+  --acc-50: var(--color-indigo-50);
+  --acc-100: var(--color-indigo-100);
+  --acc-600: var(--color-indigo-600);
+  --acc-700: var(--color-indigo-700);
+  --acc-800: var(--color-indigo-800);
+}
+
+[data-channel="b2b"] {
+  --acc-50: var(--color-clay-50);
+  --acc-100: var(--color-clay-100);
+  --acc-600: var(--color-clay-600);
+  --acc-700: var(--color-clay-700);
+  --acc-800: var(--color-clay-800);
+}
+
+html {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-canvas);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01";
+  line-height: 1.75;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--acc-600);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: var(--acc-100);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Latin codes (SKU, order codes) inside RTL text */
+.ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
