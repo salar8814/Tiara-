@@ -1,0 +1,6 @@
+BASELINE trial 1: stock after expiry = 400 (correct: 200); per-process releases = [{"ok":0,"failed":21},{"ok":0,"failed":50},{"ok":200,"failed":0},{"ok":200,"failed":27}]
+BASELINE trial 2: stock after expiry = 400 (correct: 200); per-process releases = [{"ok":0,"failed":50},{"ok":200,"failed":0},{"ok":200,"failed":13},{"ok":0,"failed":32}]
+BASELINE trial 3: stock after expiry = 400 (correct: 200); per-process releases = [{"ok":200,"failed":24},{"ok":0,"failed":46},{"ok":0,"failed":46},{"ok":200,"failed":0}]
+BASELINE trial 4: stock after expiry = 200 (correct: 200); per-process releases = [{"ok":0,"failed":50},{"ok":0,"failed":45},{"ok":200,"failed":0},{"ok":0,"failed":50}]
+BASELINE trial 5: stock after expiry = 400 (correct: 200); per-process releases = [{"ok":200,"failed":26},{"ok":0,"failed":24},{"ok":0,"failed":41},{"ok":200,"failed":0}]
+      Tests  5 passed (5)

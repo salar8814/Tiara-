@@ -1,0 +1,15 @@
+line 2: invalid mobile
+line 3: invalid status
+2 error(s); nothing imported
+exit=1
+valid: 2 records (dry run, nothing written)
+imported 2 HR records; eligibility applies at each user's next login/checkout
+granted admin for 09351112233
+usage: npm run staff:grant -- <09xxxxxxxxx> <admin|sales|finance|warehouse> [--revoke]
+exit=2
+[
+  { mobile: '09351112233', status: 'active' },
+  { mobile: '09351112244', status: 'pending' }
+] [
+  { mobile: '09351112233', role: 'admin', granted_by: 'cli:operator' }
+] [ { action: 'hr.import' }, { action: 'staff.grant' } ]

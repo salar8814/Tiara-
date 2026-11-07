@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStaff } from "@/lib/authz";
 import { currentUser } from "@/lib/session";
 import { BasketLinks, NavLinks } from "./header-client";
 import { Container, Icon } from "./ui";
@@ -45,7 +46,7 @@ export async function SiteHeader() {
         </div>
         <div className="flex items-center gap-1">
           <BasketLinks />
-          {user?.role === "admin" && (
+          {isStaff(user) && (
             <Link href="/admin" className="hidden h-10 items-center rounded-md px-3 text-sm font-semibold text-ink-soft hover:bg-sunken sm:flex">
               پنل مدیریت
             </Link>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { placeOrderAction } from "@/app/actions/shop";
 import { storeRules } from "@/data/rules";
 import { cartTotals } from "@/lib/pricing";
@@ -31,6 +31,9 @@ export function CheckoutForm({ catalog, addresses, paymentMode, payrollEnabled, 
   const [error, setError] = useState<string | null>(null);
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [pending, start] = useTransition();
+  // One key per checkout attempt: a double click, retry or replay returns the same order.
+  // Created lazily in the submit handler (not during render) and reused for retries.
+  const idempotencyKey = useRef<string | null>(null);
 
   if (!cart.hydrated) return <div className="h-96 animate-pulse rounded-lg bg-sunken" aria-busy />;
   if (cart.lines.length === 0) {
@@ -51,12 +54,15 @@ export function CheckoutForm({ catalog, addresses, paymentMode, payrollEnabled, 
   const submit = () => {
     setError(null);
     setLineErrors({});
+    idempotencyKey.current ??= crypto.randomUUID();
+    const key = idempotencyKey.current;
     start(async () => {
       const res = await placeOrderAction({
         lines: cart.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
         deliveryMethod: delivery,
         addressId: method.requiresAddress ? addressId : null,
         paymentMethod: payment,
+        idempotencyKey: key,
       });
       if (!res.ok) {
         setError(res.error);

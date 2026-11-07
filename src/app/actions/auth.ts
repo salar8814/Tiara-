@@ -1,7 +1,9 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { otpMode } from "@/lib/integrations";
+import { otpMode } from "@/lib/config";
+import { hit, limits } from "@/lib/rate-limit";
+import { clientIp, ipLimit } from "@/lib/request";
 import { claimRfqsForUser } from "@/lib/repo/rfqs";
 import { issueOtp, upsertUserOnLogin, verifyOtp } from "@/lib/repo/users";
 import { endSession, safeNext, startSession } from "@/lib/session";
@@ -20,13 +22,26 @@ export async function requestOtpAction(_prev: LoginState, form: FormData): Promi
   const parsed = mobileSchema.safeParse(form.get("mobile"));
   if (!parsed.success) return { step: "mobile", error: parsed.error.issues[0].message };
   const mobile = parsed.data;
-  if (otpMode() === "disabled") {
+  const mode = otpMode(); // throws if a demo mode is configured in production
+  if (mode === "disabled") {
     return { step: "mobile", mobile, error: "سرویس پیامک هنوز متصل نشده است؛ ورود در این محیط امکان‌پذیر نیست." };
   }
+  const ip = await clientIp();
+  const perIp = hit(`otp:issue-ip:${ip}`, ipLimit(ip, limits.otpIssuePerIp));
+  if (!perIp.ok) return { step: "mobile", mobile, error: "تعداد درخواست‌های ورود از این شبکه زیاد است. کمی بعد دوباره تلاش کنید." };
   const res = issueOtp(mobile);
-  if (!res.ok) return { step: "code", mobile, error: `برای ارسال دوبارهٔ کد ${res.retryInSec.toLocaleString("fa-IR")} ثانیه صبر کنید.` };
-  // Real implementation: send res.code via the SMS provider here.
-  return { step: "code", mobile, devCode: res.code, expiresAt: res.expiresAt };
+  if (!res.ok) {
+    const msg =
+      res.reason === "cooldown"
+        ? `برای ارسال دوبارهٔ کد ${res.retryInSec.toLocaleString("fa-IR")} ثانیه صبر کنید.`
+        : res.reason === "locked"
+          ? "به دلیل تلاش‌های ناموفق زیاد، ورود با این شماره تا ۲۴ ساعت مسدود است."
+          : "تعداد کدهای درخواستی برای این شماره زیاد است. یک ساعت دیگر تلاش کنید.";
+    return { step: res.reason === "cooldown" ? "code" : "mobile", mobile, error: msg };
+  }
+  // A real SMS provider would send res.code here. Only display mode returns it to the browser,
+  // and display mode cannot be enabled in production (src/lib/config.ts).
+  return { step: "code", mobile, devCode: mode === "display" ? res.code : undefined, expiresAt: res.expiresAt };
 }
 
 export async function verifyOtpAction(prev: LoginState, form: FormData): Promise<LoginState> {
@@ -34,11 +49,13 @@ export async function verifyOtpAction(prev: LoginState, form: FormData): Promise
   if (!mobile) return { step: "mobile", error: "شمارهٔ همراه را دوباره وارد کنید." };
   const parsed = otpSchema.safeParse(form.get("code"));
   if (!parsed.success) return { ...prev, error: parsed.error.issues[0].message };
+  const ip = await clientIp();
+  if (!hit(`otp:verify-ip:${ip}`, ipLimit(ip, limits.otpVerifyPerIp)).ok) return { ...prev, error: "تعداد تلاش‌ها از این شبکه زیاد است. کمی بعد دوباره تلاش کنید." };
   const result = verifyOtp(mobile, parsed.data);
   const messages = {
     expired: "کد منقضی شده است. کد جدید دریافت کنید.",
     invalid: "کد واردشده درست نیست.",
-    locked: "تعداد تلاش‌ها بیش از حد مجاز بود. کد جدید دریافت کنید.",
+    locked: "تعداد تلاش‌های نادرست بیش از حد مجاز بود. کد جدید دریافت کنید یا بعداً تلاش کنید.",
     missing: "ابتدا کد ورود را دریافت کنید.",
   } as const;
   if (result !== "ok") return { ...prev, error: messages[result] };
@@ -57,7 +74,7 @@ export async function loginAction(prev: LoginState, form: FormData): Promise<Log
     const fd = new FormData();
     fd.set("mobile", prev.mobile ?? "");
     const res = await requestOtpAction(prev, fd);
-    return { ...prev, ...res, devCode: res.devCode ?? prev.devCode };
+    return { ...prev, ...res, devCode: res.devCode };
   }
   return requestOtpAction(prev, form);
 }

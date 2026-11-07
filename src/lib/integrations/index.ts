@@ -5,22 +5,9 @@ import "server-only";
 // non-production mode explicitly. Nothing in the app reports success for an
 // integration that is not configured.
 
-export type PaymentMode = "disabled" | "sandbox";
-export type OtpMode = "disabled" | "display";
+import { demoAllowed, otpMode, paymentMode } from "../config";
 
-const isProd = process.env.NODE_ENV === "production";
-
-export function paymentMode(): PaymentMode {
-  const v = process.env.PAYMENT_MODE;
-  if (v === "sandbox" || v === "disabled") return v;
-  return isProd ? "disabled" : "sandbox";
-}
-
-export function otpMode(): OtpMode {
-  const v = process.env.OTP_MODE;
-  if (v === "display" || v === "disabled") return v;
-  return isProd ? "disabled" : "display";
-}
+export { otpMode, paymentMode };
 
 export function payrollEnabled(): boolean {
   // No payroll/finance API exists yet. Even if the flag is set, the
@@ -48,8 +35,10 @@ export function integrationStatus(): IntegrationStatus[] {
     {
       id: "hr",
       name: "احراز کارمند (سامانهٔ منابع انسانی)",
-      state: "demo_data",
-      detail: "از فهرست نمونهٔ کارکنان استفاده می‌شود. اتصال به سامانهٔ HR یا SSO گروه لازم است.",
+      state: demoAllowed() ? "demo_data" : "not_connected",
+      detail: demoAllowed()
+        ? "از فهرست نمونهٔ کارکنان استفاده می‌شود. اتصال به سامانهٔ HR یا SSO گروه لازم است."
+        : "فقط رکوردهای واردشده با npm run hr:import معتبرند؛ اتصال مستقیم به سامانهٔ HR یا SSO هنوز وجود ندارد.",
     },
     {
       id: "sms",

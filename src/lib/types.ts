@@ -89,7 +89,9 @@ export interface Product {
 }
 
 export type Eligibility = "eligible" | "pending" | "ineligible" | "not_employee";
-export type Role = "employee" | "customer" | "admin";
+export type Role = "employee" | "customer";
+/** Staff duties are separate from the customer role (see src/lib/authz.ts). */
+export type StaffRole = "admin" | "sales" | "finance" | "warehouse";
 
 export interface User {
   id: string;
@@ -100,6 +102,7 @@ export interface User {
   employeeCode: string | null;
   unit: string | null;
   company: string | null;
+  staffRoles: StaffRole[];
   createdAt: string;
 }
 
@@ -127,7 +130,7 @@ export type OrderStatus =
   | "cancelled";
 
 export type PaymentMethod = "gateway" | "payroll";
-export type PaymentStatus = "unpaid" | "paid" | "paid_sandbox" | "failed";
+export type PaymentStatus = "unpaid" | "paid" | "paid_sandbox" | "failed" | "refund_pending" | "refunded";
 
 export interface OrderItem {
   productId: string;
@@ -147,6 +150,7 @@ export interface Order {
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   paymentRef: string | null;
+  refundRef: string | null;
   deliveryMethod: string;
   subtotalRetail: number;
   employeeDiscount: number;
@@ -204,13 +208,15 @@ export interface Rfq {
   customization: string | null;
   deadline: string; // ISO date
   notes: string | null;
+  /** staff mobile of the sales owner */
+  assignedTo: string | null;
   items: RfqItem[];
   events: TimelineEvent[];
   createdAt: string;
   updatedAt: string;
 }
 
-export type QuotationStatus = "issued" | "approved" | "declined" | "superseded" | "expired";
+export type QuotationStatus = "issued" | "approved" | "declined" | "superseded" | "expired" | "withdrawn";
 
 export interface QuotationLine {
   productId: string;

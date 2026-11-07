@@ -6,6 +6,9 @@ import { listMeetings } from "@/lib/repo/meetings";
 import { listOrders } from "@/lib/repo/orders";
 import { listProducts } from "@/lib/repo/products";
 import { listRfqs } from "@/lib/repo/rfqs";
+import { requireStaff } from "@/lib/session";
+import { reconcile } from "@/lib/repo/inventory";
+import { Notice } from "@/components/ui";
 
 const stateBadge = {
   connected: { label: "متصل", tone: "success" as const },
@@ -14,13 +17,17 @@ const stateBadge = {
   not_connected: { label: "متصل نیست", tone: "danger" as const },
 };
 
-export default function AdminDashboard() {
+export default async function AdminDashboard({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
+  await requireStaff("staff.dashboard");
+  const denied = (await searchParams).denied;
+  const drift = reconcile();
   const orders = listOrders();
   const rfqs = listRfqs();
   const meetings = listMeetings();
   const products = listProducts({ includeInactive: true });
   const lowStock = products.flatMap((p) => p.variants.filter((v) => v.stock <= 5).map((v) => ({ p, v })));
   const paidRevenue = orders.filter((o) => o.paymentStatus === "paid").reduce((s, o) => s + o.total, 0);
+  const refundsDue = orders.filter((o) => o.paymentStatus === "refund_pending");
   const sandboxRevenue = orders.filter((o) => o.paymentStatus === "paid_sandbox").reduce((s, o) => s + o.total, 0);
 
   const kpis = [
@@ -33,6 +40,8 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-black text-ink">داشبورد</h1>
+      {denied && <Notice tone="danger">نقش شما اجازهٔ دسترسی به آن بخش را ندارد.</Notice>}
+      {drift.length > 0 && <Notice tone="danger">مغایرت موجودی با دفتر موجودی در {faNum(drift.length)} گزینه.</Notice>}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {kpis.map((k) => (
           <Link key={k.label} href={k.href} className="rounded-lg border border-line bg-surface p-4 hover:border-line-strong">
@@ -48,6 +57,7 @@ export default function AdminDashboard() {
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between"><dt className="text-muted">پرداخت واقعی تطبیق‌شده</dt><dd className="num font-bold">{toman(paidRevenue)}</dd></div>
             <div className="flex justify-between"><dt className="text-muted">پرداخت آزمایشی (شبیه‌ساز)</dt><dd className="num font-bold text-warning">{toman(sandboxRevenue)}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted">بازگشت وجه معوق</dt><dd className="num font-bold text-danger">{faNum(refundsDue.length)} سفارش · {toman(refundsDue.reduce((s, o) => s + o.total, 0))}</dd></div>
             <div className="flex justify-between"><dt className="text-muted">تعداد کل سفارش‌ها</dt><dd className="num font-bold">{faNum(orders.length)}</dd></div>
           </dl>
         </section>

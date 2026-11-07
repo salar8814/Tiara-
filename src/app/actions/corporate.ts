@@ -9,7 +9,10 @@ import { addDays, tehranIsoDate, toLatinDigits } from "@/lib/format";
 import { validateB2BQty } from "@/lib/pricing";
 import { SlotTakenError, requestMeeting } from "@/lib/repo/meetings";
 import { listProducts } from "@/lib/repo/products";
-import { createRfq, decideQuotation, getRfqByCode, listQuotations } from "@/lib/repo/rfqs";
+import { RfqStateError, createRfq, getRfqByCode, listQuotations } from "@/lib/repo/rfqs";
+import { hit, limits } from "@/lib/rate-limit";
+import { clientIp, ipLimit } from "@/lib/request";
+import { NotAllowedError, decideOwnQuotation } from "@/lib/services/customer";
 import { currentUser } from "@/lib/session";
 import type { RfqItem } from "@/lib/types";
 import { fieldErrors, meetingSchema, rfqContactSchema, rfqItemSchema, type FieldErrors } from "@/lib/validation";
@@ -26,6 +29,10 @@ export type RfqSubmitResult =
 
 export async function submitRfqAction(input: RfqSubmitInput): Promise<RfqSubmitResult> {
   const user = await currentUser();
+  const ip = await clientIp();
+  if (!hit(`rfq:ip:${ip}`, ipLimit(ip, limits.rfqSubmitPerIp)).ok) {
+    return { ok: false, errors: {}, error: "تعداد درخواست‌های ثبت‌شده از این شبکه زیاد است. یک ساعت دیگر تلاش کنید یا با فروش سازمانی تماس بگیرید." };
+  }
   const contact = rfqContactSchema.safeParse(input.contact ?? {});
   const errors: FieldErrors = contact.success ? {} : fieldErrors(contact.error);
 
@@ -74,14 +81,18 @@ export async function submitRfqAction(input: RfqSubmitInput): Promise<RfqSubmitR
 
 export interface TrackState {
   error?: string;
+  values?: { code: string; phone: string };
 }
 
 export async function trackRfqAction(_prev: TrackState, form: FormData): Promise<TrackState> {
-  const code = toLatinDigits(String(form.get("code") ?? "")).trim().toUpperCase();
-  const phone = toLatinDigits(String(form.get("phone") ?? "")).replace(/[\s-]/g, "");
+  const ip = await clientIp();
+  const values = { code: String(form.get("code") ?? "").slice(0, 40), phone: String(form.get("phone") ?? "").slice(0, 20) };
+  if (!hit(`track:ip:${ip}`, ipLimit(ip, limits.trackPerIp)).ok) return { error: "تعداد جست‌وجوها زیاد است. چند دقیقه بعد دوباره تلاش کنید.", values };
+  const code = toLatinDigits(values.code).trim().toUpperCase();
+  const phone = toLatinDigits(values.phone).replace(/[\s-]/g, "");
   const rfq = code ? getRfqByCode(code) : null;
   // Same message whether the code or the phone is wrong, to avoid enumeration.
-  if (!rfq || rfq.phone !== phone) return { error: "درخواستی با این کد و شمارهٔ تماس پیدا نشد." };
+  if (!rfq || rfq.phone !== phone) return { error: "درخواستی با این کد و شمارهٔ تماس پیدا نشد.", values };
   await grantRfqAccess(rfq.code);
   redirect(`/corporate/requests/${rfq.code}`);
 }
@@ -89,18 +100,22 @@ export async function trackRfqAction(_prev: TrackState, form: FormData): Promise
 export interface MeetingState {
   errors?: FieldErrors;
   error?: string;
+  values?: Record<string, string>;
 }
 
 export async function bookMeetingAction(_prev: MeetingState, form: FormData): Promise<MeetingState> {
   const user = await currentUser();
+  const values = Object.fromEntries(["company", "contactName", "phone", "topic"].map((k) => [k, String(form.get(k) ?? "").slice(0, 600)]));
   const parsed = meetingSchema.safeParse(Object.fromEntries(form));
-  if (!parsed.success) return { errors: fieldErrors(parsed.error), error: "لطفاً موارد مشخص‌شده را کامل کنید." };
+  if (!parsed.success) return { errors: fieldErrors(parsed.error), error: "لطفاً موارد مشخص‌شده را کامل کنید." , values };
+  const ip = await clientIp();
+  if (!hit(`meeting:ip:${ip}`, ipLimit(ip, limits.meetingPerIp)).ok) return { error: "تعداد درخواست‌های جلسه از این شبکه زیاد است. کمی بعد تلاش کنید." , values };
   const d = parsed.data;
 
   let rfqId: string | null = null;
   if (d.rfqCode) {
     const rfq = getRfqByCode(d.rfqCode);
-    if (!rfq || !(await canAccessRfq(rfq, user))) return { error: "درخواست مرتبط یافت نشد." };
+    if (!rfq || !(await canAccessRfq(rfq, user))) return { error: "درخواست مرتبط یافت نشد." , values };
     rfqId = rfq.id;
   }
   try {
@@ -126,16 +141,25 @@ export async function bookMeetingAction(_prev: MeetingState, form: FormData): Pr
 
 export async function decideQuotationAction(form: FormData) {
   const user = await currentUser();
-  const code = String(form.get("code") ?? "");
-  const quotationId = String(form.get("quotationId") ?? "");
+  const code = String(form.get("code") ?? "").slice(0, 40);
+  const quotationId = String(form.get("quotationId") ?? "").slice(0, 80);
   const decision = form.get("decision") === "approved" ? "approved" : "declined";
   const note = String(form.get("note") ?? "").trim().slice(0, 500) || null;
   const rfq = getRfqByCode(code);
   if (!rfq || !(await canAccessRfq(rfq, user))) redirect("/corporate/track");
+  // Approving is a financial commitment: it requires the OTP-verified owner, not just code + phone.
+  if (!user) redirect(`/login?next=${encodeURIComponent(`/corporate/requests/${code}`)}`);
   if (!listQuotations(rfq.id).some((q) => q.id === quotationId && q.status === "issued")) {
     redirect(`/corporate/requests/${code}?error=quotation`);
   }
-  decideQuotation(quotationId, decision, user ? `customer:${user.mobile}` : `customer:${rfq.phone}`, note);
+  let failed: string | null = null;
+  try {
+    decideOwnQuotation(user, code, quotationId, decision, note);
+  } catch (e) {
+    if (e instanceof NotAllowedError) failed = "owner";
+    else if (e instanceof RfqStateError) failed = "quotation";
+    else throw e;
+  }
   revalidatePath(`/corporate/requests/${code}`);
-  redirect(`/corporate/requests/${code}?decision=${decision}`);
+  redirect(`/corporate/requests/${code}?${failed ? `error=${failed}` : `decision=${decision}`}`);
 }

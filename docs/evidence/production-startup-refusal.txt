@@ -1,0 +1,3 @@
+exit=1 [tiara] refusing to start: SESSION_SECRET is required when TIARA_ENV=production
+exit=1 [tiara] refusing to start: OTP_MODE=display is not allowed when TIARA_ENV=production
+exit=1 [tiara] refusing to start: PAYMENT_MODE=sandbox is not allowed when TIARA_ENV=production

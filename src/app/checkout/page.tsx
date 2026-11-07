@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { CheckoutForm } from "@/components/checkout-form";
 import { EligibilityBanner } from "@/components/eligibility";
 import { Container, LinkButton, PageHeader, Stepper } from "@/components/ui";
-import { paymentMode, payrollEnabled } from "@/lib/integrations";
+import { paymentMode } from "@/lib/config";
+import { payrollEnabled } from "@/lib/integrations";
 import { canUseEmployeePrice } from "@/lib/pricing";
-import { listAddresses } from "@/lib/repo/users";
+import { listAddresses, refreshEligibility } from "@/lib/repo/users";
 import { requireUser } from "@/lib/session";
 import { b2cSnapshot } from "@/lib/snapshot";
 
@@ -18,7 +19,8 @@ const steps = [
 ];
 
 export default async function CheckoutPage() {
-  const user = await requireUser("/checkout");
+  // Eligibility is re-read from HR here and again when the order is placed.
+  const user = refreshEligibility(await requireUser("/checkout"));
   const crumbs = [{ href: "/", label: "دنیای تیارا" }, { href: "/cart", label: "سبد خرید" }, { label: "تکمیل سفارش" }];
 
   if (!canUseEmployeePrice(user.eligibility)) {

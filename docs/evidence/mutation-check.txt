@@ -1,0 +1,12 @@
+== M1: drop the status guard on cancellation (baseline B-01 pattern)
+1
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  4 failed | 26 passed (30)
+== M2: do not merge duplicate lines (B-02)
+     × B-02: per-order cap applies to the variant even across duplicate lines 7ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 27 passed (28)
+== M3: allow generic transition to paid (B-03)
+     × B-03: generic transition cannot mark an order paid 5ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 27 passed (28)

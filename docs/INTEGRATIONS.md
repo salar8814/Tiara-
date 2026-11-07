@@ -1,5 +1,7 @@
 # Implemented vs simulated, integrations, deployment, roadmap
 
+> **Updated by the hardening pass.** Readiness and the prioritised work list now live in [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md). Demo modes are now refused in production (`TIARA_ENV`); the env flags below apply to development, test and staging only.
+
 ## Implemented and persisted
 
 - Catalog, variants, stock and per-order caps, stored in SQLite and editable in admin. Orders keep the price at the time of purchase.

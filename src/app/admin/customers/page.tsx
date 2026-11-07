@@ -2,10 +2,12 @@ import { Badge } from "@/components/ui";
 import { faNum, jDate, toman } from "@/lib/format";
 import { listUsers } from "@/lib/repo/users";
 import { eligibilityLabel } from "@/lib/status";
+import { requireStaff } from "@/lib/session";
 
 export const metadata = { title: "مشتریان" };
 
-export default function AdminCustomers() {
+export default async function AdminCustomers() {
+  await requireStaff("customers.view");
   const users = listUsers();
   return (
     <div className="space-y-4">

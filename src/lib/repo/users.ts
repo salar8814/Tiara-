@@ -1,13 +1,15 @@
 import "server-only";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { db, newId, now } from "../db";
-import type { Address, Eligibility, Role, User } from "../types";
+import { db, newId, now, tx } from "../db";
+import { hit, limits, peek } from "../rate-limit";
+import type { Address, Eligibility, Role, StaffRole, User } from "../types";
 import type { AddressInput } from "../validation";
 
 const OTP_TTL_MS = 2 * 60_000;
 const OTP_RESEND_MS = 60_000;
 const OTP_MAX_ATTEMPTS = 5;
-export const SESSION_TTL_DAYS = 30;
+export const SESSION_TTL_DAYS = 14;
+export const MAX_ADDRESSES = 20;
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -23,6 +25,9 @@ interface UserRow {
   created_at: string;
 }
 
+const staffRolesFor = (mobile: string): StaffRole[] =>
+  (db().prepare("SELECT role FROM staff_roles WHERE mobile = ? ORDER BY role").all(mobile) as { role: StaffRole }[]).map((r) => r.role);
+
 const toUser = (r: UserRow): User => ({
   id: r.id,
   mobile: r.mobile,
@@ -32,49 +37,64 @@ const toUser = (r: UserRow): User => ({
   employeeCode: r.employee_code,
   unit: r.unit,
   company: r.company,
+  staffRoles: staffRolesFor(r.mobile),
   createdAt: r.created_at,
 });
 
 // ── OTP ──
 
-export type OtpIssue = { ok: true; code: string; expiresAt: string } | { ok: false; retryInSec: number };
+export type OtpIssue =
+  | { ok: true; code: string; expiresAt: string }
+  | { ok: false; reason: "cooldown" | "rate_limited" | "locked"; retryInSec: number };
 
-export function issueOtp(mobile: string): OtpIssue {
-  const existing = db().prepare("SELECT created_at FROM otp_codes WHERE mobile = ?").get(mobile) as
-    | { created_at: string }
-    | undefined;
-  if (existing) {
-    const elapsed = Date.now() - new Date(existing.created_at).getTime();
-    if (elapsed < OTP_RESEND_MS) return { ok: false, retryInSec: Math.ceil((OTP_RESEND_MS - elapsed) / 1000) };
+/**
+ * Issues a new code. Abuse controls (all per mobile, persisted):
+ * 60 s resend cooldown · 5 codes per hour · refused while the daily wrong-guess budget is exhausted.
+ * Per-IP limits are applied by the caller (it knows the request).
+ */
+export function issueOtp(mobile: string, nowMs = Date.now()): OtpIssue {
+  if (!peek(`otp:fail:${mobile}`, limits.otpFailuresPerMobile, nowMs)) {
+    return { ok: false, reason: "locked", retryInSec: limits.otpFailuresPerMobile.windowSec };
   }
+  const existing = db().prepare("SELECT created_at FROM otp_codes WHERE mobile = ?").get(mobile) as { created_at: string } | undefined;
+  if (existing) {
+    const elapsed = nowMs - new Date(existing.created_at).getTime();
+    if (elapsed < OTP_RESEND_MS) return { ok: false, reason: "cooldown", retryInSec: Math.ceil((OTP_RESEND_MS - elapsed) / 1000) };
+  }
+  const quota = hit(`otp:issue:${mobile}`, limits.otpIssuePerMobile, nowMs);
+  if (!quota.ok) return { ok: false, reason: "rate_limited", retryInSec: quota.retryAfterSec };
   const code = String(randomInt(10000, 100000));
-  const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
+  const expiresAt = new Date(nowMs + OTP_TTL_MS).toISOString();
   db()
     .prepare(
       `INSERT INTO otp_codes (mobile, code_hash, expires_at, attempts, created_at) VALUES (?, ?, ?, 0, ?)
        ON CONFLICT(mobile) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, created_at = excluded.created_at`,
     )
-    .run(mobile, sha(`${mobile}:${code}`), expiresAt, now());
+    .run(mobile, sha(`${mobile}:${code}`), expiresAt, new Date(nowMs).toISOString());
   return { ok: true, code, expiresAt };
 }
 
 export type OtpCheck = "ok" | "expired" | "invalid" | "locked" | "missing";
 
 export function verifyOtp(mobile: string, code: string): OtpCheck {
-  const row = db().prepare("SELECT * FROM otp_codes WHERE mobile = ?").get(mobile) as
-    | { code_hash: string; expires_at: string; attempts: number }
-    | undefined;
-  if (!row) return "missing";
-  if (row.attempts >= OTP_MAX_ATTEMPTS) return "locked";
-  if (new Date(row.expires_at).getTime() < Date.now()) return "expired";
-  const a = Buffer.from(row.code_hash);
-  const b = Buffer.from(sha(`${mobile}:${code}`));
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    db().prepare("UPDATE otp_codes SET attempts = attempts + 1 WHERE mobile = ?").run(mobile);
-    return "invalid";
-  }
-  db().prepare("DELETE FROM otp_codes WHERE mobile = ?").run(mobile);
-  return "ok";
+  return tx((): OtpCheck => {
+    if (!peek(`otp:fail:${mobile}`, limits.otpFailuresPerMobile)) return "locked";
+    const row = db().prepare("SELECT * FROM otp_codes WHERE mobile = ?").get(mobile) as
+      | { code_hash: string; expires_at: string; attempts: number }
+      | undefined;
+    if (!row) return "missing";
+    if (row.attempts >= OTP_MAX_ATTEMPTS) return "locked";
+    if (new Date(row.expires_at).getTime() < Date.now()) return "expired";
+    const a = Buffer.from(row.code_hash);
+    const b = Buffer.from(sha(`${mobile}:${code}`));
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      db().prepare("UPDATE otp_codes SET attempts = attempts + 1 WHERE mobile = ?").run(mobile);
+      hit(`otp:fail:${mobile}`, limits.otpFailuresPerMobile);
+      return "invalid";
+    }
+    db().prepare("DELETE FROM otp_codes WHERE mobile = ?").run(mobile);
+    return "ok";
+  });
 }
 
 // ── HR eligibility (demo directory stands in for the HR service) ──
@@ -85,36 +105,49 @@ interface DirRow {
   unit: string;
   company: string;
   status: "active" | "pending" | "inactive";
-  admin: number;
 }
 
-function resolveEligibility(mobile: string) {
+/**
+ * Eligibility source. In production this table is filled only by the HR
+ * integration / `npm run hr:import`; demo rows exist only outside production.
+ */
+export function resolveEligibility(mobile: string) {
   const dir = db().prepare("SELECT * FROM hr_directory WHERE mobile = ?").get(mobile) as DirRow | undefined;
   if (!dir) return { role: "customer" as Role, eligibility: "not_employee" as Eligibility, dir: null };
   const eligibility: Eligibility =
     dir.status === "active" ? "eligible" : dir.status === "pending" ? "pending" : "ineligible";
-  return { role: (dir.admin ? "admin" : "employee") as Role, eligibility, dir };
+  return { role: "employee" as Role, eligibility, dir };
+}
+
+/** Re-reads HR state for a signed-in user (used at checkout, so leavers lose pricing immediately). */
+export function refreshEligibility(user: User): User {
+  const { role, eligibility } = resolveEligibility(user.mobile);
+  if (role !== user.role || eligibility !== user.eligibility) {
+    db().prepare("UPDATE users SET role = ?, eligibility = ? WHERE id = ?").run(role, eligibility, user.id);
+  }
+  return getUser(user.id)!;
 }
 
 /** Find or create the user and re-sync eligibility from the HR source on every login. */
 export function upsertUserOnLogin(mobile: string): User {
   const { role, eligibility, dir } = resolveEligibility(mobile);
-  const existing = db().prepare("SELECT * FROM users WHERE mobile = ?").get(mobile) as UserRow | undefined;
-  if (existing) {
-    db()
-      .prepare(
-        `UPDATE users SET role = ?, eligibility = ?, name = COALESCE(?, name), employee_code = ?, unit = COALESCE(?, unit), company = COALESCE(?, company) WHERE id = ?`,
-      )
-      .run(role, eligibility, dir?.name ?? null, dir?.employee_code ?? null, dir?.unit ?? null, dir?.company ?? null, existing.id);
-    return getUser(existing.id)!;
-  }
-  const id = newId();
-  db()
+  // Single atomic statement: concurrent first logins for one mobile (double submit,
+  // two tabs, two processes) must not race on the UNIQUE(mobile) constraint.
+  const row = db()
     .prepare(
-      `INSERT INTO users (id, mobile, name, role, eligibility, employee_code, unit, company, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, mobile, name, role, eligibility, employee_code, unit, company, created_at)
+       VALUES (@id, @mobile, @name, @role, @eligibility, @code, @unit, @company, @now)
+       ON CONFLICT(mobile) DO UPDATE SET
+         role = excluded.role,
+         eligibility = excluded.eligibility,
+         name = COALESCE(excluded.name, users.name),
+         employee_code = excluded.employee_code,
+         unit = COALESCE(excluded.unit, users.unit),
+         company = COALESCE(excluded.company, users.company)
+       RETURNING id`,
     )
-    .run(id, mobile, dir?.name ?? null, role, eligibility, dir?.employee_code ?? null, dir?.unit ?? null, dir?.company ?? null, now());
-  return getUser(id)!;
+    .get({ id: newId(), mobile, name: dir?.name ?? null, role, eligibility, code: dir?.employee_code ?? null, unit: dir?.unit ?? null, company: dir?.company ?? null, now: now() }) as { id: string };
+  return getUser(row.id)!;
 }
 
 export function getUser(id: string): User | null {
@@ -144,8 +177,14 @@ export function listUsers(): (User & { orders: number; rfqs: number; spent: numb
 export function createSession(userId: string): { token: string; expiresAt: Date } {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 86_400_000);
-  db().prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(sha(token), userId, expiresAt.toISOString());
+  db().prepare("DELETE FROM sessions WHERE expires_at < ?").run(now());
+  db().prepare("INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)").run(sha(token), userId, expiresAt.toISOString(), now());
   return { token, expiresAt };
+}
+
+/** Ends every session of a user (role change, compromise, "sign out everywhere"). */
+export function deleteUserSessions(userId: string) {
+  db().prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
 }
 
 export function userForSession(token: string): User | null {
@@ -207,10 +246,13 @@ export function getAddress(userId: string, id: string): Address | null {
   return r ? toAddress(r) : null;
 }
 
+export class AddressLimitError extends Error {}
+
 export function addAddress(userId: string, input: AddressInput, makeDefault: boolean): Address {
   const id = newId();
-  const tx = db().transaction(() => {
+  const run = db().transaction(() => {
     const count = (db().prepare("SELECT COUNT(*) c FROM addresses WHERE user_id = ?").get(userId) as { c: number }).c;
+    if (count >= MAX_ADDRESSES) throw new AddressLimitError();
     const isDefault = makeDefault || count === 0;
     if (isDefault) db().prepare("UPDATE addresses SET is_default = 0 WHERE user_id = ?").run(userId);
     db()
@@ -220,12 +262,12 @@ export function addAddress(userId: string, input: AddressInput, makeDefault: boo
       )
       .run({ id, userId, ...input, isDefault: isDefault ? 1 : 0, createdAt: now() });
   });
-  tx();
+  run();
   return getAddress(userId, id)!;
 }
 
 export function deleteAddress(userId: string, id: string) {
-  const tx = db().transaction(() => {
+  const run = db().transaction(() => {
     const target = getAddress(userId, id);
     if (!target) return;
     db().prepare("DELETE FROM addresses WHERE user_id = ? AND id = ?").run(userId, id);
@@ -236,13 +278,41 @@ export function deleteAddress(userId: string, id: string) {
       if (next) db().prepare("UPDATE addresses SET is_default = 1 WHERE id = ?").run(next.id);
     }
   });
-  tx();
+  run();
 }
 
 export function setDefaultAddress(userId: string, id: string) {
-  const tx = db().transaction(() => {
+  const run = db().transaction(() => {
     db().prepare("UPDATE addresses SET is_default = 0 WHERE user_id = ?").run(userId);
     db().prepare("UPDATE addresses SET is_default = 1 WHERE user_id = ? AND id = ?").run(userId, id);
   });
-  tx();
+  run();
+}
+
+// ── staff roles ──
+
+export function listStaff(): { mobile: string; role: StaffRole; grantedBy: string; grantedAt: string; name: string | null }[] {
+  return (
+    db()
+      .prepare("SELECT s.mobile, s.role, s.granted_by, s.granted_at, u.name FROM staff_roles s LEFT JOIN users u ON u.mobile = s.mobile ORDER BY s.mobile, s.role")
+      .all() as { mobile: string; role: StaffRole; granted_by: string; granted_at: string; name: string | null }[]
+  ).map((r) => ({ mobile: r.mobile, role: r.role, grantedBy: r.granted_by, grantedAt: r.granted_at, name: r.name }));
+}
+
+/** Changes staff roles and ends that person's sessions so new privileges apply on next login. */
+export function setStaffRole(mobile: string, role: StaffRole, granted: boolean, actor: string) {
+  tx(() => {
+    if (granted) {
+      db().prepare("INSERT OR IGNORE INTO staff_roles (mobile, role, granted_by, granted_at) VALUES (?, ?, ?, ?)").run(mobile, role, actor, now());
+    } else {
+      const admins = db().prepare("SELECT COUNT(*) c FROM staff_roles WHERE role = 'admin'").get() as { c: number };
+      if (role === "admin" && admins.c <= 1) throw new Error("cannot remove the last admin");
+      db().prepare("DELETE FROM staff_roles WHERE mobile = ? AND role = ?").run(mobile, role);
+    }
+    const u = db().prepare("SELECT id FROM users WHERE mobile = ?").get(mobile) as { id: string } | undefined;
+    if (u) deleteUserSessions(u.id);
+    db()
+      .prepare("INSERT INTO audit_log (actor, action, entity, entity_id, before, after, created_at) VALUES (?, ?, 'staff_role', ?, NULL, ?, ?)")
+      .run(actor, granted ? "staff.grant" : "staff.revoke", mobile, JSON.stringify({ role }), now());
+  });
 }

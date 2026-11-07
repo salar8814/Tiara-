@@ -2,10 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProductSettingsForm } from "@/components/admin-forms";
 import { getProductById } from "@/lib/repo/products";
+import { requireStaff } from "@/lib/session";
 
 export const metadata = { title: "تنظیمات محصول" };
 
 export default async function AdminProduct({ params }: { params: Promise<{ id: string }> }) {
+  await requireStaff("catalog.edit");
   const p = getProductById((await params).id);
   if (!p) notFound();
   return (

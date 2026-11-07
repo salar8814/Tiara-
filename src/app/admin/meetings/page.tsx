@@ -6,6 +6,8 @@ import { faTime, jDayLabel } from "@/lib/format";
 import { listMeetings } from "@/lib/repo/meetings";
 import { getRfqById } from "@/lib/repo/rfqs";
 import { meetingStatus } from "@/lib/status";
+import { requireStaff } from "@/lib/session";
+import { AdminFlash } from "@/components/admin-flash";
 import type { MeetingStatus } from "@/lib/types";
 
 export const metadata = { title: "جلسه‌ها" };
@@ -17,11 +19,14 @@ const actions: Record<MeetingStatus, { to: MeetingStatus; label: string; danger?
   completed: [],
 };
 
-export default function AdminMeetings() {
+export default async function AdminMeetings({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  await requireStaff("meetings.manage");
+  const sp = await searchParams;
   const meetings = listMeetings();
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-black text-ink">جلسه‌ها</h1>
+      <AdminFlash sp={sp} />
       <p className="text-sm text-muted">تقویم کارشناسان هنوز متصل نیست؛ پس از هماهنگی تلفنی، جلسه را اینجا تأیید کنید تا وضعیت برای مشتری به‌روز شود.</p>
       {meetings.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line-strong bg-surface p-8 text-center text-sm text-muted">هنوز درخواست جلسه‌ای ثبت نشده است.</p>

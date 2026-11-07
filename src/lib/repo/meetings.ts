@@ -1,6 +1,6 @@
 import "server-only";
 import { b2bRules } from "@/data/rules";
-import { db, newId, now } from "../db";
+import { db, newId, now, tx } from "../db";
 import { addDays, faTime, jDayLabel, tehranIsoDate } from "../format";
 import type { Meeting, MeetingStatus, MeetingType } from "../types";
 import { addEvent } from "./common";
@@ -59,6 +59,9 @@ export function takenSlots(days: string[]): Set<string> {
 
 export class SlotTakenError extends Error {}
 
+/** Open (requested/confirmed, future) meeting requests allowed per contact phone. */
+export const MAX_ACTIVE_MEETINGS_PER_PHONE = 2;
+
 export function requestMeeting(input: {
   rfqId: string | null;
   userId: string | null;
@@ -73,6 +76,12 @@ export function requestMeeting(input: {
   const days = bookableDays();
   if (!days.includes(input.date) || !b2bRules.meeting.slots.includes(input.time)) {
     throw new SlotTakenError("این زمان قابل رزرو نیست.");
+  }
+  const active = db()
+    .prepare("SELECT COUNT(*) c FROM meetings WHERE phone = ? AND status IN ('requested','confirmed') AND date >= ?")
+    .get(input.phone, days[0]) as { c: number };
+  if (active.c >= MAX_ACTIVE_MEETINGS_PER_PHONE) {
+    throw new SlotTakenError("برای این شمارهٔ تماس جلسه‌های فعال ثبت شده است. لطفاً منتظر تماس کارشناس بمانید.");
   }
   const id = newId();
   try {
@@ -112,13 +121,16 @@ const meetingTransitions: Record<MeetingStatus, MeetingStatus[]> = {
 };
 
 export function setMeetingStatus(id: string, to: MeetingStatus, actor: string) {
-  const m = getMeeting(id);
-  if (!m) throw new Error("not found");
-  if (!meetingTransitions[m.status].includes(to)) throw new Error("invalid transition");
-  db().prepare("UPDATE meetings SET status = ? WHERE id = ?").run(to, id);
-  addEvent("meeting", id, to, null, actor);
-  if (m.rfqId) {
-    const label = to === "confirmed" ? "جلسه توسط کارشناس تأیید شد." : to === "cancelled" ? "جلسه لغو شد." : "جلسه برگزار شد.";
-    addEvent("rfq", m.rfqId, `meeting_${to}`, label, actor);
-  }
+  tx(() => {
+    const m = getMeeting(id);
+    if (!m) throw new Error("not found");
+    if (!meetingTransitions[m.status].includes(to)) throw new Error("invalid transition");
+    const res = db().prepare("UPDATE meetings SET status = ? WHERE id = ? AND status = ?").run(to, id, m.status);
+    if (res.changes !== 1) throw new Error("meeting changed concurrently");
+    addEvent("meeting", id, to, null, actor);
+    if (m.rfqId) {
+      const label = to === "confirmed" ? "جلسه توسط کارشناس تأیید شد." : to === "cancelled" ? "جلسه لغو شد." : "جلسه برگزار شد.";
+      addEvent("rfq", m.rfqId, `meeting_${to}`, label, actor);
+    }
+  });
 }

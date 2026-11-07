@@ -9,3 +9,5 @@ next-env.d.ts
 /data/*.db-*
 .DS_Store
 /screenshots/
+/test-results/
+/playwright-report/

@@ -1,0 +1,20 @@
+## node v22.23.4, npm 10.9.9
+## npm ci
+added 445 packages, and audited 446 packages in 48s
+8 moderate severity vulnerabilities
+## typecheck
+typecheck: OK (exit 0)
+## lint
+lint: OK (exit 0, 0 problems)
+## unit+integration
+ Test Files  10 passed (10)
+      Tests  112 passed (112)
+   Duration  4.43s (tests 77%, transform 13%, import 8%, setup 1%, worker 1%)
+## build
+✓ Compiled successfully in 3.9s
+## e2e
+  9 passed (13.0s)
+## audit --omit=dev
+found 0 vulnerabilities
+## audit (all)
+  npm audit fix --force

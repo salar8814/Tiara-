@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { faNum, toLatinDigits, toman } from "@/lib/format";
 import { b2bPriceVisible, leadTimeDays, snapQty, tierFor, validateB2BQty } from "@/lib/pricing";
 import type { B2BSnapshot } from "@/lib/snapshot";
@@ -9,7 +9,14 @@ import type { B2BConfig } from "@/lib/types";
 import { useInquiry } from "./stores";
 import { Button, Field, Icon, Input, Textarea, cx } from "./ui";
 
-export function B2BConfigurator({ product, signedIn }: { product: B2BSnapshot; signedIn: boolean }) {
+/** Waits for the saved inquiry list (localStorage) so the form starts from the saved line. */
+export function B2BConfigurator(props: { product: B2BSnapshot; signedIn: boolean }) {
+  const inq = useInquiry();
+  if (!inq.hydrated) return <div className="h-96 animate-pulse rounded-lg bg-sunken" aria-busy />;
+  return <Configurator {...props} />;
+}
+
+function Configurator({ product, signedIn }: { product: B2BSnapshot; signedIn: boolean }) {
   const inq = useInquiry();
   const existing = inq.lines.find((l) => l.productId === product.productId);
   const cfg: B2BConfig = { ...product, customization: product.customization };
@@ -18,18 +25,6 @@ export function B2BConfigurator({ product, signedIn }: { product: B2BSnapshot; s
   const [note, setNote] = useState(existing?.note ?? "");
   const [touched, setTouched] = useState(false);
   const [saved, setSaved] = useState(false);
-
-  // Once localStorage is read, restore a previously saved line for this product.
-  const restored = useRef(false);
-  useEffect(() => {
-    if (!inq.hydrated || restored.current) return;
-    restored.current = true;
-    if (existing) {
-      setQtyText(String(existing.qty));
-      setCustom(existing.customization);
-      setNote(existing.note);
-    }
-  }, [inq.hydrated, existing]);
 
   const qty = Number(toLatinDigits(qtyText).replace(/[,٬\s]/g, ""));
   const qtyError = validateB2BQty(cfg, qty);

@@ -88,7 +88,11 @@ export default async function CorporateCatalog({ searchParams }: { searchParams:
           <div>
             <div className="mb-3 flex items-center justify-between text-sm text-muted">
               <p aria-live="polite"><span className="num font-semibold text-ink">{faNum(products.length)}</span> محصول و بسته</p>
-              {filtered && <a href="/corporate" className="font-semibold text-clay-700 hover:underline">پاک کردن فیلترها</a>}
+              {filtered && (
+                // Full reload on purpose: resets the uncontrolled filter inputs.
+                // eslint-disable-next-line @next/next/no-html-link-for-pages
+                <a href="/corporate" className="font-semibold text-clay-700 hover:underline">پاک کردن فیلترها</a>
+              )}
             </div>
             <div className="transition-opacity group-data-[pending]:opacity-60">
               {products.length === 0 ? (

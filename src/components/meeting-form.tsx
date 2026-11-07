@@ -30,6 +30,7 @@ export function MeetingForm({
   const [time, setTime] = useState("");
   const [type, setType] = useState("onsite_client");
   const e = state.errors ?? {};
+  const val = (k: string, fallback: string | null | undefined) => state.values?.[k] ?? fallback ?? "";
 
   return (
     <form action={action} noValidate className="grid gap-6 lg:grid-cols-2 lg:items-start">
@@ -38,12 +39,12 @@ export function MeetingForm({
       <input type="hidden" name="type" value={type} />
       {rfqCode && <input type="hidden" name="rfqCode" value={rfqCode} />}
 
-      <section className="rounded-lg border border-line bg-surface p-5 sm:p-6" aria-labelledby="slot-title">
+      <section className="min-w-0 rounded-lg border border-line bg-surface p-5 sm:p-6" aria-labelledby="slot-title">
         <h2 id="slot-title" className="mb-5 font-bold text-ink">انتخاب زمان</h2>
 
         <fieldset>
           <legend className="mb-2 text-sm font-semibold text-ink-soft">روز</legend>
-          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          <div className="relative -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
             {days.map((d) => {
               const free = b2bRules.meeting.slots.filter((s) => !takenSet.has(`${d.iso} ${s}`)).length;
               const on = d.iso === date;
@@ -105,20 +106,20 @@ export function MeetingForm({
         </fieldset>
       </section>
 
-      <section className="rounded-lg border border-line bg-surface p-5 sm:p-6" aria-labelledby="contact-title">
+      <section className="min-w-0 rounded-lg border border-line bg-surface p-5 sm:p-6" aria-labelledby="contact-title">
         <h2 id="contact-title" className="mb-5 font-bold text-ink">اطلاعات درخواست</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="نام سازمان" htmlFor="m-company" error={e.company} required>
-            <Input id="m-company" name="company" defaultValue={defaults.company ?? ""} invalid={!!e.company} />
+            <Input id="m-company" name="company" defaultValue={val("company", defaults.company)} invalid={!!e.company} />
           </Field>
           <Field label="نام و نام خانوادگی" htmlFor="m-name" error={e.contactName} required>
-            <Input id="m-name" name="contactName" defaultValue={defaults.contactName ?? ""} invalid={!!e.contactName} />
+            <Input id="m-name" name="contactName" defaultValue={val("contactName", defaults.contactName)} invalid={!!e.contactName} />
           </Field>
           <Field label="شمارهٔ تماس" htmlFor="m-phone" error={e.phone} required className="sm:col-span-2">
-            <Input id="m-phone" name="phone" inputMode="tel" dir="ltr" className="text-end" defaultValue={defaults.phone ?? ""} invalid={!!e.phone} />
+            <Input id="m-phone" name="phone" inputMode="tel" dir="ltr" className="text-end" defaultValue={val("phone", defaults.phone)} invalid={!!e.phone} />
           </Field>
           <Field label="موضوع جلسه" htmlFor="m-topic" hint="سفارشی‌سازی، تیراژ، زمان تحویل موردنظر" className="sm:col-span-2">
-            <Textarea id="m-topic" name="topic" rows={3} defaultValue={defaults.topic ?? ""} maxLength={600} />
+            <Textarea id="m-topic" name="topic" rows={3} defaultValue={val("topic", defaults.topic)} maxLength={600} />
           </Field>
         </div>
         <Notice tone="info" className="mt-5">

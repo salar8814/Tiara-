@@ -99,14 +99,30 @@ export function getVariants(ids: string[]): Map<string, Variant> {
   return new Map(rows.map((r) => [r.id, toVariant(r)]));
 }
 
-// ── admin mutations ──
-
-export function updateVariant(id: string, patch: Pick<Variant, "retailPrice" | "employeePrice" | "stock" | "maxPerOrder">) {
-  db()
+/** Variants that may be sold in the employee store right now (active product, B2C channel). */
+export function getPurchasableVariants(ids: string[]): Map<string, Variant & { productName: string }> {
+  if (ids.length === 0) return new Map();
+  const rows = db()
     .prepare(
-      `UPDATE variants SET retail_price = @retailPrice, employee_price = @employeePrice, stock = @stock, max_per_order = @maxPerOrder WHERE id = @id`,
+      `SELECT v.*, p.name AS product_name FROM variants v JOIN products p ON p.id = v.product_id
+       WHERE v.id IN (${ids.map(() => "?").join(",")}) AND p.active = 1 AND EXISTS (SELECT 1 FROM json_each(p.channels) WHERE value = 'b2c')`,
     )
+    .all(...ids) as (VariantRow & { product_name: string })[];
+  return new Map(rows.map((r) => [r.id, { ...toVariant(r), productName: r.product_name }]));
+}
+
+// ── admin mutations (called only from src/lib/services/admin.ts, which enforces permissions and audits) ──
+
+/** Prices and caps only. Stock changes go through repo/inventory.ts. */
+export function updateVariantPricing(id: string, patch: Pick<Variant, "retailPrice" | "employeePrice" | "maxPerOrder">) {
+  db()
+    .prepare(`UPDATE variants SET retail_price = @retailPrice, employee_price = @employeePrice, max_per_order = @maxPerOrder WHERE id = @id`)
     .run({ id, ...patch });
+}
+
+export function getVariant(id: string): Variant | null {
+  const r = db().prepare("SELECT * FROM variants WHERE id = ?").get(id) as VariantRow | undefined;
+  return r ? toVariant(r) : null;
 }
 
 export function updateProduct(id: string, patch: { active: boolean; summary: string; b2b: B2BConfig | null }) {

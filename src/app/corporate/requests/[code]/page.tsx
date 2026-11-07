@@ -6,7 +6,7 @@ import { Timeline } from "@/components/timeline";
 import { Badge, Button, Container, Icon, KeyValue, LinkButton, Notice, PageHeader, Stepper, Textarea } from "@/components/ui";
 import { b2bRules, storeRules } from "@/data/rules";
 import { occasionById } from "@/data/taxonomy";
-import { canAccessRfq } from "@/lib/access";
+import { canAccessRfq, canDecideRfq } from "@/lib/access";
 import { faNum, faTime, jDate, jDateTime, jDayLabel, toman } from "@/lib/format";
 import { listMeetings } from "@/lib/repo/meetings";
 import { getCorporateOrderForRfq, getRfqByCode, listQuotations } from "@/lib/repo/rfqs";
@@ -84,7 +84,8 @@ export default async function RequestPage({ params, searchParams }: P) {
       {sp.meeting === "requested" && <Notice tone="success" className="mt-6">درخواست جلسه ثبت شد و منتظر تأیید کارشناس است.</Notice>}
       {sp.decision === "approved" && <Notice tone="success" className="mt-6">پیشنهاد قیمت تأیید شد و پیش‌فاکتور صادر شد. سفارش پس از پرداخت یا دریافت سفارش خرید قطعی می‌شود.</Notice>}
       {sp.decision === "declined" && <Notice tone="info" className="mt-6">پاسخ شما ثبت شد. کارشناس فروش برای بازنگری با شما تماس می‌گیرد.</Notice>}
-      {sp.error === "quotation" && <Notice tone="danger" className="mt-6">این پیشنهاد قیمت دیگر قابل تأیید نیست (منقضی یا جایگزین شده است).</Notice>}
+      {sp.error === "quotation" && <Notice tone="danger" className="mt-6">این پیشنهاد قیمت دیگر قابل تأیید نیست (منقضی، پس‌گرفته یا جایگزین شده است).</Notice>}
+      {sp.error === "owner" && <Notice tone="danger" className="mt-6">تأیید پیشنهاد فقط با ورود همان شمارهٔ همراهی که درخواست را ثبت کرده ممکن است.</Notice>}
 
       <section className="mt-6 rounded-lg border border-line bg-surface p-5 sm:p-6">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
@@ -138,7 +139,14 @@ export default async function RequestPage({ params, searchParams }: P) {
               ]}
             />
           </div>
-          {latest.status === "issued" && (
+          {latest.status === "issued" && !canDecideRfq(rfq, user) && (
+            <div className="border-t border-line bg-canvas p-5 text-sm text-ink-soft">
+              برای تأیید یا رد این پیشنهاد، با شمارهٔ همراه درخواست‌کننده وارد شوید.{" "}
+              <Link href={`/login?next=${encodeURIComponent(`/corporate/requests/${rfq.code}`)}`} className="font-semibold text-clay-700 hover:underline">ورود</Link>
+              <p className="mt-1 text-xs text-muted">اگر شمارهٔ ثبت‌شده تلفن ثابت است، تأیید را به کارشناس فروش اعلام کنید.</p>
+            </div>
+          )}
+          {latest.status === "issued" && canDecideRfq(rfq, user) && (
             <form action={decideQuotationAction} className="border-t border-line bg-canvas p-5">
               <input type="hidden" name="code" value={rfq.code} />
               <input type="hidden" name="quotationId" value={latest.id} />

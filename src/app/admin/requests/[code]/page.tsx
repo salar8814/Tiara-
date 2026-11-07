@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { confirmCorporateOrderAction, corporateOrderTransitionAction, rfqTransitionAction } from "@/app/actions/admin";
+import { assignRfqAction, confirmCorporateOrderAction, corporateOrderTransitionAction, rfqTransitionAction } from "@/app/actions/admin";
+import { AdminFlash } from "@/components/admin-flash";
+import { can } from "@/lib/authz";
+import { listStaff } from "@/lib/repo/users";
+import { requireStaff } from "@/lib/session";
 import { QuotationBuilder } from "@/components/admin-forms";
 import { Timeline } from "@/components/timeline";
-import { Badge, Button, KeyValue, Notice } from "@/components/ui";
+import { Badge, Button, KeyValue } from "@/components/ui";
 import { b2bRules, storeRules } from "@/data/rules";
 import { occasionById } from "@/data/taxonomy";
 import { addDays, faNum, faTime, jDate, jDayLabel, tehranIsoDate, toman } from "@/lib/format";
@@ -23,7 +27,9 @@ import {
 
 export const metadata = { title: "جزئیات استعلام" };
 
-export default async function AdminRequest({ params, searchParams }: { params: Promise<{ code: string }>; searchParams: Promise<{ error?: string }> }) {
+export default async function AdminRequest({ params, searchParams }: { params: Promise<{ code: string }>; searchParams: Promise<{ error?: string; ok?: string }> }) {
+  const user = await requireStaff();
+  if (!can(user, "rfq.manage") && !can(user, "corporate_orders.confirm") && !can(user, "corporate_orders.fulfil")) notFound();
   const { code } = await params;
   const sp = await searchParams;
   const rfq = getRfqByCode(code);
@@ -31,7 +37,8 @@ export default async function AdminRequest({ params, searchParams }: { params: P
   const quotations = listQuotations(rfq.id);
   const order = getCorporateOrderForRfq(rfq.id);
   const meetings = listMeetings({ rfqId: rfq.id });
-  const canQuote = ["in_review", "quoted", "declined"].includes(rfq.status);
+  const canQuote = ["in_review", "quoted", "declined"].includes(rfq.status) && can(user, "quotes.issue");
+  const salesStaff = listStaff().filter((s) => s.role === "sales" || s.role === "admin");
   const manual = rfqTransitions[rfq.status].filter((s) => ["in_review", "closed"].includes(s));
 
   // Suggest prices from the tier table and lead time from customisation.
@@ -57,7 +64,18 @@ export default async function AdminRequest({ params, searchParams }: { params: P
         <h1 className="ltr text-2xl font-black text-ink">{rfq.code}</h1>
         <Badge tone={rfqStatus[rfq.status].tone}>{rfqStatus[rfq.status].label}</Badge>
       </div>
-      {sp.error === "reference" && <Notice tone="danger">مرجع پرداخت یا شمارهٔ سفارش خرید را وارد کنید.</Notice>}
+      <AdminFlash sp={sp} />
+      {can(user, "rfq.manage") && <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface px-5 py-3 text-sm">
+        <p>مسئول پیگیری: <strong>{rfq.assignedTo ? (salesStaff.find((s) => s.mobile === rfq.assignedTo)?.name ?? rfq.assignedTo) : "تعیین نشده"}</strong></p>
+        <form action={assignRfqAction} className="flex items-center gap-2">
+          <input type="hidden" name="code" value={rfq.code} />
+          <select name="assignee" defaultValue={rfq.assignedTo ?? ""} className="h-9 rounded border border-line-strong bg-surface px-2 text-sm" aria-label="مسئول پیگیری">
+            <option value="">بدون مسئول</option>
+            {Array.from(new Map(salesStaff.map((s) => [s.mobile, s])).values()).map((s) => <option key={s.mobile} value={s.mobile}>{s.name ?? s.mobile}</option>)}
+          </select>
+          <Button size="sm" variant="secondary">ثبت مسئول</Button>
+        </form>
+      </section>}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
         <div className="space-y-6">
@@ -84,7 +102,7 @@ export default async function AdminRequest({ params, searchParams }: { params: P
                 </li>
               ))}
             </ul>
-            {manual.length > 0 && (
+            {manual.length > 0 && can(user, "rfq.manage") && (
               <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
                 {manual.map((s) => (
                   <form key={s} action={rfqTransitionAction} className="flex gap-2">
@@ -112,6 +130,8 @@ export default async function AdminRequest({ params, searchParams }: { params: P
             )}
             {canQuote ? (
               <QuotationBuilder code={rfq.code} items={rfq.items} suggested={suggested} vatRate={storeRules.vatRate} defaultDelivery={defaultDelivery} />
+            ) : !can(user, "quotes.issue") ? (
+              <p className="text-sm text-muted">صدور پیشنهاد قیمت با نقش فروش سازمانی است.</p>
             ) : rfq.status === "submitted" ? (
               <p className="text-sm text-muted">برای صدور پیشنهاد قیمت، ابتدا درخواست را «در حال بررسی» کنید.</p>
             ) : (
@@ -119,10 +139,10 @@ export default async function AdminRequest({ params, searchParams }: { params: P
             )}
           </section>
 
-          {rfq.status === "approved" && (
+          {rfq.status === "approved" && can(user, "corporate_orders.confirm") && (
             <section className="rounded-lg border border-line bg-surface p-5">
               <h2 className="mb-2 font-bold text-ink">ثبت سفارش قطعی</h2>
-              <p className="mb-3 text-sm text-muted">پس از دریافت پیش‌پرداخت یا سفارش خرید رسمی، مرجع آن را ثبت کنید تا سفارش قطعی شود.</p>
+              <p className="mb-3 text-sm text-muted">واحد مالی: پس از دریافت پیش‌پرداخت یا سفارش خرید رسمی، مرجع آن را ثبت کنید تا سفارش قطعی شود.</p>
               <form action={confirmCorporateOrderAction} className="flex flex-wrap gap-2">
                 <input type="hidden" name="code" value={rfq.code} />
                 <input name="reference" required placeholder="شمارهٔ فیش / سفارش خرید" className="h-10 flex-1 rounded border border-line-strong px-3 text-sm" aria-label="مرجع پرداخت یا سفارش خرید" />
@@ -139,7 +159,7 @@ export default async function AdminRequest({ params, searchParams }: { params: P
               </div>
               <p className="mt-1 text-sm text-muted">{toman(order.total)} · مرجع {order.reference}</p>
               <div className="mt-3 flex gap-2">
-                {corporateOrderTransitions[order.status].map((s) => (
+                {can(user, "corporate_orders.fulfil") && corporateOrderTransitions[order.status].map((s) => (
                   <form key={s} action={corporateOrderTransitionAction}>
                     <input type="hidden" name="id" value={order.id} />
                     <input type="hidden" name="code" value={rfq.code} />

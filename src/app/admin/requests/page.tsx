@@ -4,11 +4,16 @@ import { occasionById } from "@/data/taxonomy";
 import { faNum, jDate } from "@/lib/format";
 import { listRfqs } from "@/lib/repo/rfqs";
 import { rfqStatus } from "@/lib/status";
+import { can } from "@/lib/authz";
+import { requireStaff } from "@/lib/session";
+import { notFound } from "next/navigation";
 import type { RfqStatus } from "@/lib/types";
 
 export const metadata = { title: "استعلام‌ها" };
 
 export default async function AdminRequests({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+  const user = await requireStaff();
+  if (!can(user, "rfq.manage") && !can(user, "corporate_orders.confirm") && !can(user, "corporate_orders.fulfil")) notFound();
   const sp = await searchParams;
   const status = sp.status && sp.status in rfqStatus ? (sp.status as RfqStatus) : null;
   const all = listRfqs();

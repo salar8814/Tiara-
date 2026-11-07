@@ -2,10 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { paymentMode, payrollEnabled } from "@/lib/integrations";
-import { CheckoutError, createOrder, getOrderByCode, settleSandboxPayment } from "@/lib/repo/orders";
-import { getVariants } from "@/lib/repo/products";
-import { addAddress, deleteAddress, getAddress, setDefaultAddress, updateProfile } from "@/lib/repo/users";
+import { paymentMode } from "@/lib/config";
+import { payrollEnabled } from "@/lib/integrations";
+import { CheckoutError, OrderStateError, customerCancelOrder, settleSandboxPayment } from "@/lib/repo/orders";
+import { getPurchasableVariants } from "@/lib/repo/products";
+import { AddressLimitError, MAX_ADDRESSES, addAddress, deleteAddress, getAddress, setDefaultAddress, updateProfile } from "@/lib/repo/users";
+import { getOwnOrder, placeOrder } from "@/lib/services/customer";
 import { currentUser } from "@/lib/session";
 import type { Address } from "@/lib/types";
 import { addressSchema, fieldErrors, type FieldErrors } from "@/lib/validation";
@@ -15,6 +17,8 @@ export interface PlaceOrderInput {
   deliveryMethod: string;
   addressId: string | null;
   paymentMethod: "gateway" | "payroll";
+  /** generated once per checkout attempt by the browser; makes double submits idempotent */
+  idempotencyKey: string;
 }
 
 export type PlaceOrderResult = { ok: false; error: string; lineErrors?: Record<string, string> } | { ok: true; code: string };
@@ -22,6 +26,7 @@ export type PlaceOrderResult = { ok: false; error: string; lineErrors?: Record<s
 export async function placeOrderAction(input: PlaceOrderInput): Promise<PlaceOrderResult> {
   const user = await currentUser();
   if (!user) return { ok: false, error: "برای ثبت سفارش ابتدا وارد شوید." };
+  if (input.paymentMethod !== "gateway" && input.paymentMethod !== "payroll") return { ok: false, error: "روش پرداخت نامعتبر است." };
   if (input.paymentMethod === "payroll" && !payrollEnabled()) {
     return { ok: false, error: "کسر از حقوق هنوز فعال نیست؛ پرداخت اینترنتی را انتخاب کنید." };
   }
@@ -34,7 +39,13 @@ export async function placeOrderAction(input: PlaceOrderInput): Promise<PlaceOrd
     if (!address) return { ok: false, error: "نشانی انتخاب‌شده یافت نشد." };
   }
   try {
-    const order = createOrder({ user, lines, deliveryMethod: input.deliveryMethod, address, paymentMethod: input.paymentMethod });
+    const order = placeOrder(user, {
+      lines,
+      deliveryMethod: String(input.deliveryMethod),
+      address,
+      paymentMethod: input.paymentMethod,
+      idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : null,
+    });
     revalidatePath("/shop");
     return { ok: true, code: order.code };
   } catch (e) {
@@ -44,16 +55,26 @@ export async function placeOrderAction(input: PlaceOrderInput): Promise<PlaceOrd
   }
 }
 
+export async function cancelOwnOrderAction(form: FormData) {
+  const user = await currentUser();
+  const code = String(form.get("code") ?? "").slice(0, 40);
+  if (!user) redirect("/login");
+  const done = customerCancelOrder(user, code);
+  revalidatePath("/account");
+  redirect(`/account/orders/${encodeURIComponent(code)}?${done ? "cancelled=1" : "error=state"}`);
+}
+
 export async function sandboxPayAction(form: FormData) {
   const user = await currentUser();
   const code = String(form.get("code") ?? "");
   const outcome = form.get("outcome") === "failure" ? "failure" : "success";
-  const order = getOrderByCode(code);
-  if (!user || !order || order.userId !== user.id) redirect("/account");
+  const order = user ? getOwnOrder(user, code) : null;
+  if (!user || !order) redirect("/account");
   if (paymentMode() !== "sandbox") redirect(`/checkout/${code}?error=gateway`);
   try {
     settleSandboxPayment(order.id, outcome);
-  } catch {
+  } catch (e) {
+    if (!(e instanceof OrderStateError)) throw e;
     redirect(`/checkout/${code}?error=state`);
   }
   redirect(`/checkout/${code}?result=${outcome}`);
@@ -62,9 +83,9 @@ export async function sandboxPayAction(form: FormData) {
 /** Validates current stock/prices for a past order and returns lines the client can add to the cart. */
 export async function reorderAction(code: string): Promise<{ lines: { variantId: string; qty: number }[]; skipped: string[] }> {
   const user = await currentUser();
-  const order = getOrderByCode(code);
-  if (!user || !order || order.userId !== user.id) return { lines: [], skipped: [] };
-  const variants = getVariants(order.items.map((i) => i.variantId));
+  const order = user ? getOwnOrder(user, code) : null;
+  if (!user || !order) return { lines: [], skipped: [] };
+  const variants = getPurchasableVariants(order.items.map((i) => i.variantId));
   const lines: { variantId: string; qty: number }[] = [];
   const skipped: string[] = [];
   for (const i of order.items) {
@@ -81,14 +102,23 @@ export interface AddressFormState {
   ok?: boolean;
   errors?: FieldErrors;
   address?: Address;
+  /** submitted values, restored after React resets the form on error */
+  values?: Record<string, string>;
 }
 
 export async function addAddressAction(_prev: AddressFormState, form: FormData): Promise<AddressFormState> {
   const user = await currentUser();
   if (!user) return { errors: { _: "ابتدا وارد شوید." } };
-  const parsed = addressSchema.safeParse(Object.fromEntries(form));
-  if (!parsed.success) return { errors: fieldErrors(parsed.error) };
-  const address = addAddress(user.id, parsed.data, form.get("makeDefault") === "on");
+  const values = Object.fromEntries(["label", "recipient", "mobile", "province", "city", "street", "plaque", "unit", "postalCode"].map((k) => [k, String(form.get(k) ?? "").slice(0, 400)]));
+  const parsed = addressSchema.safeParse(values);
+  if (!parsed.success) return { errors: fieldErrors(parsed.error), values };
+  let address: Address;
+  try {
+    address = addAddress(user.id, parsed.data, form.get("makeDefault") === "on");
+  } catch (e) {
+    if (e instanceof AddressLimitError) return { errors: { _: `حداکثر ${MAX_ADDRESSES.toLocaleString("fa-IR")} نشانی می‌توانید ذخیره کنید.` }, values };
+    throw e;
+  }
   revalidatePath("/account");
   revalidatePath("/checkout");
   return { ok: true, address };

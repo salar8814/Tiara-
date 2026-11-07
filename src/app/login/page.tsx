@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/login-form";
 import { Container, Icon } from "@/components/ui";
-import { demoDirectory } from "@/data/demo-directory";
-import { otpMode } from "@/lib/integrations";
+import { demoDirectory, demoStaff } from "@/data/demo-directory";
+import { staffRoleLabels } from "@/lib/authz";
+import { demoAllowed } from "@/lib/config";
+import { otpMode } from "@/lib/config";
 import { currentUser, safeNext } from "@/lib/session";
 
 export const metadata: Metadata = { title: "ورود" };
@@ -13,7 +15,8 @@ const statusLabel = { active: "فعال — واجد شرایط", pending: "در
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const next = safeNext((await searchParams).next, "/account");
   if (await currentUser()) redirect(next);
-  const demo = otpMode() === "display";
+  // The demo list is shown only where demo data exists at all (never in production).
+  const demo = demoAllowed() && otpMode() === "display";
 
   return (
     <Container className="max-w-5xl py-10 sm:py-16">
@@ -56,7 +59,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
                 {demoDirectory.map((d) => (
                   <li key={d.mobile} className="flex items-center justify-between gap-2 py-2">
                     <span className="ltr font-semibold text-ink">{d.mobile}</span>
-                    <span className="text-muted">{d.name} · {d.admin ? "مدیر سامانه" : statusLabel[d.status]}</span>
+                    <span className="text-muted">{d.name} · {demoStaff.find((s) => s.mobile === d.mobile)?.roles.map((r) => staffRoleLabels[r]).join("، ") ?? statusLabel[d.status]}</span>
                   </li>
                 ))}
               </ul>

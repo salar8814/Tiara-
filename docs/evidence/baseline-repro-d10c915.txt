@@ -1,0 +1,168 @@
+ RUN  v5.1.0 /home/user/Tiara-
+ ❯ tests/integration/baseline-repro.test.ts (12 tests | 12 failed) 59ms
+   ❯ B-01 expired order releases stock twice under concurrent expiry (1)
+     × a second process holding a stale list must not restore stock again 30ms
+   ❯ B-02 per-order cap bypass with duplicate lines (1)
+     × rejects 2×3 units of a variant whose cap is 3 4ms
+   ❯ B-03 order marked paid without any payment (1)
+     × generic transition must not move pending_payment → paid 2ms
+   ❯ B-04 inactive products remain purchasable (1)
+     × rejects checkout of a deactivated product 2ms
+   ❯ B-05 cancelling a paid order leaves no refund obligation (1)
+     × paid → cancelled must record that a refund is owed 2ms
+   ❯ B-06 admin stock edit overwrites concurrent reservations (lost update) (1)
+     × saving a stale absolute stock value must not resurrect reserved units 2ms
+   ❯ B-07 duplicate order submission (1)
+     × a double-submitted checkout must not create two orders 2ms
+   ❯ B-08 quotation approvable after the RFQ was closed or re-opened (2)
+     × closed RFQ 4ms
+     × RFQ moved back to review for re-quoting 3ms
+   ❯ B-09 open redirect in login `next` (1)
+     × rejects backslash-prefixed targets 2ms
+   ❯ B-10 demo HR directory (incl. an admin) is seeded in production (1)
+     × production database must not contain demo staff 1ms
+   ❯ B-11 OTP guessing is not bounded per mobile (1)
+     × no more than 10 wrong guesses per mobile per day across re-issued codes 3ms
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-01 expired order releases stock twice under concurrent expiry > a second process holding a stale list must not restore stock again
+AssertionError: expected 12 to be 10 // Object.is equality
+- Expected
++ Received
+- 10
++ 12
+ ❯ tests/integration/baseline-repro.test.ts:42:24
+     40|     })();
+     41|     b.close();
+     42|     expect(stockOf(V)).toBe(10); // baseline: 12 — two phantom units c…
+       |                        ^
+     43|   });
+     44| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-02 per-order cap bypass with duplicate lines > rejects 2×3 units of a variant whose cap is 3
+AssertionError: expected [Function] to throw an error
+ ❯ tests/integration/baseline-repro.test.ts:48:79
+     46| describe("B-02 per-order cap bypass with duplicate lines", () => {
+     47|   it("rejects 2×3 units of a variant whose cap is 3", () => {
+     48|     expect(() => order([{ variantId: V, qty: 3 }, { variantId: V, qty:…
+       |                                                                               ^
+     49|   });
+     50| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-03 order marked paid without any payment > generic transition must not move pending_payment → paid
+AssertionError: expected [Function] to throw an error
+ ❯ tests/integration/baseline-repro.test.ts:55:60
+     53|   it("generic transition must not move pending_payment → paid", () => {
+     54|     const o = order();
+     55|     expect(() => transitionOrder(o.id, "paid", "admin:x")).toThrow();
+       |                                                            ^
+     56|   });
+     57| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-04 inactive products remain purchasable > rejects checkout of a deactivated product
+AssertionError: expected [Function] to throw an error
+ ❯ tests/integration/baseline-repro.test.ts:64:29
+     62|     updateProduct(p.id, { active: false, summary: p.summary, b2b: p.b2…
+     63|     try {
+     64|       expect(() => order()).toThrow();
+       |                             ^
+     65|     } finally {
+     66|       updateProduct(p.id, { active: true, summary: p.summary, b2b: p.b…
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-05 cancelling a paid order leaves no refund obligation > paid → cancelled must record that a refund is owed
+AssertionError: expected 'paid' not to be 'paid' // Object.is equality
+ ❯ tests/integration/baseline-repro.test.ts:76:51
+     74|     db().prepare("UPDATE orders SET status='paid', payment_status='pai…
+     75|     transitionOrder(o.id, "cancelled", "admin:x");
+     76|     expect(getOrderById(o.id)!.paymentStatus).not.toBe("paid");
+       |                                                   ^
+     77|   });
+     78| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-06 admin stock edit overwrites concurrent reservations (lost update) > saving a stale absolute stock value must not resurrect reserved units
+AssertionError: expected 10 to be 8 // Object.is equality
+- Expected
++ Received
+- 8
++ 10
+ ❯ tests/integration/baseline-repro.test.ts:85:24
+     83|     order([{ variantId: V, qty: 2 }]); // customer reserves 2 → 8
+     84|     updateVariant(V, { retailPrice: 1_850_000, employeePrice: 1_295_00…
+     85|     expect(stockOf(V)).toBe(8); // baseline: 10
+       |                        ^
+     86|   });
+     87| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-07 duplicate order submission > a double-submitted checkout must not create two orders
+AssertionError: expected 2 to be 1 // Object.is equality
+- Expected
++ Received
+- 1
++ 2
+ ❯ tests/integration/baseline-repro.test.ts:95:95
+     93|     createOrder(input);
+     94|     createOrder(input);
+     95|     expect((db().prepare("SELECT COUNT(*) c FROM orders").get() as { c…
+       |                                                                                               ^
+     96|   });
+     97| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-08 quotation approvable after the RFQ was closed or re-opened > closed RFQ
+AssertionError: expected [Function] to throw an error
+ ❯ tests/integration/baseline-repro.test.ts:110:71
+    108|     const q = quote(r.id);
+    109|     transitionRfq(r.id, "closed", "admin:x");
+    110|     expect(() => decideQuotation(q.id, "approved", "customer", null)).…
+       |                                                                       ^
+    111|   });
+    112|
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-08 quotation approvable after the RFQ was closed or re-opened > RFQ moved back to review for re-quoting
+AssertionError: expected [Function] to throw an error
+ ❯ tests/integration/baseline-repro.test.ts:118:71
+    116|     const q = quote(r.id);
+    117|     transitionRfq(r.id, "in_review", "admin:x");
+    118|     expect(() => decideQuotation(q.id, "approved", "customer", null)).…
+       |                                                                       ^
+    119|   });
+    120| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-09 open redirect in login `next` > rejects backslash-prefixed targets
+AssertionError: expected '/\evil.example' to be '/account' // Object.is equality
+Expected: "/account"
+Received: "/\evil.example"
+ ❯ tests/integration/baseline-repro.test.ts:124:41
+    122| describe("B-09 open redirect in login `next`", () => {
+    123|   it("rejects backslash-prefixed targets", () => {
+    124|     expect(safeNext("/\\evil.example")).toBe("/account");
+       |                                         ^
+    125|   });
+    126| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-10 demo HR directory (incl. an admin) is seeded in production > production database must not contain demo staff
+AssertionError: expected 1 to be +0 // Object.is equality
+- Expected
++ Received
+- 0
++ 1
+ ❯ tests/integration/baseline-repro.test.ts:134:22
+    132|     expect(process.env.TIARA_ENV === "production" ? admins.c : 0).toBe…
+    133|     // demonstrate: seeding is unconditional
+    134|     expect(admins.c).toBe(0); // baseline: 1
+       |                      ^
+    135|   });
+    136| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/12]⎯
+ FAIL  tests/integration/baseline-repro.test.ts > B-11 OTP guessing is not bounded per mobile > no more than 10 wrong guesses per mobile per day across re-issued codes
+AssertionError: expected 20 to be less than or equal to 10
+ ❯ tests/integration/baseline-repro.test.ts:152:21
+    150|       }
+    151|     }
+    152|     expect(guesses).toBeLessThanOrEqual(10); // baseline: 20
+       |                     ^
+    153|   });
+    154| });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/12]⎯
+ Test Files  1 failed (1)
+      Tests  12 failed (12)
+   Start at  18:19:35
+   Duration  454ms (import 44%, tests 28%, transform 22%, setup 4%, worker 2%)

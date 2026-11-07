@@ -4,16 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon, cx } from "./ui";
 
-const items = [
-  { href: "/admin", label: "داشبورد", icon: "grid" },
-  { href: "/admin/products", label: "محصولات، قیمت و موجودی", icon: "tag" },
-  { href: "/admin/orders", label: "سفارش‌های فروشگاه", icon: "bag" },
-  { href: "/admin/requests", label: "استعلام‌ها و پیشنهاد قیمت", icon: "doc" },
-  { href: "/admin/meetings", label: "جلسه‌ها", icon: "calendar" },
-  { href: "/admin/customers", label: "مشتریان", icon: "user" },
-];
+export interface AdminNavItem {
+  href: string;
+  label: string;
+  icon: string;
+}
 
-export function AdminNav() {
+/** Display only — every admin page and action re-checks permissions on the server. */
+export function AdminNav({ items }: { items: AdminNavItem[] }) {
   const path = usePathname();
   return (
     <nav aria-label="منوی مدیریت" className="-mx-4 overflow-x-auto px-4 lg:mx-0 lg:px-0">

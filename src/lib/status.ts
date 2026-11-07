@@ -59,6 +59,16 @@ export const quotationStatus: Record<QuotationStatus, { label: string; tone: Ton
   declined: { label: "ردشده", tone: "danger" },
   superseded: { label: "جایگزین‌شده با نسخهٔ جدید", tone: "neutral" },
   expired: { label: "منقضی‌شده", tone: "neutral" },
+  withdrawn: { label: "پس‌گرفته‌شده برای بازنگری", tone: "neutral" },
+};
+
+export const paymentStatusLabel: Record<import("./types").PaymentStatus, { label: string; tone: Tone }> = {
+  unpaid: { label: "پرداخت‌نشده", tone: "warning" },
+  failed: { label: "تراکنش ناموفق", tone: "danger" },
+  paid: { label: "پرداخت‌شده", tone: "success" },
+  paid_sandbox: { label: "پرداخت آزمایشی", tone: "warning" },
+  refund_pending: { label: "در انتظار بازگشت وجه", tone: "danger" },
+  refunded: { label: "وجه بازگردانده شد", tone: "neutral" },
 };
 
 export const corporateOrderStatus: Record<CorporateOrderStatus, { label: string; tone: Tone }> = {
@@ -95,4 +105,6 @@ export const rfqEventLabels: Record<string, string> = {
   meeting_confirmed: "جلسه تأیید شد",
   meeting_cancelled: "جلسه لغو شد",
   meeting_completed: "جلسه برگزار شد",
+  quotation_withdrawn: "پیشنهاد قیمت پس گرفته شد",
+  quotation_expired: "اعتبار پیشنهاد قیمت تمام شد",
 };

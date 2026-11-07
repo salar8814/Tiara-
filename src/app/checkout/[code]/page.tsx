@@ -4,8 +4,9 @@ import { sandboxPayAction } from "@/app/actions/shop";
 import { OrderSummary } from "@/components/order-summary";
 import { Badge, Button, Container, Icon, LinkButton, Notice, PageHeader, Stepper } from "@/components/ui";
 import { jDateTime, toman } from "@/lib/format";
-import { paymentMode } from "@/lib/integrations";
-import { PAYMENT_WINDOW_MIN, getOrderByCode } from "@/lib/repo/orders";
+import { paymentMode } from "@/lib/config";
+import { PAYMENT_WINDOW_MIN } from "@/lib/repo/orders";
+import { getOwnOrder } from "@/lib/services/customer";
 import { requireUser } from "@/lib/session";
 import { orderStatus } from "@/lib/status";
 
@@ -17,8 +18,8 @@ export default async function PaymentPage({ params, searchParams }: P) {
   const { code } = await params;
   const sp = await searchParams;
   const user = await requireUser(`/checkout/${code}`);
-  const order = getOrderByCode(code);
-  if (!order || order.userId !== user.id) notFound();
+  const order = getOwnOrder(user, code);
+  if (!order) notFound();
 
   const mode = paymentMode();
   const awaiting = order.status === "pending_payment";

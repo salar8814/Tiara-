@@ -1,6 +1,8 @@
 import "server-only";
 import { storeRules } from "@/data/rules";
-import { db, newId, now } from "../db";
+import { db, newId, now, tx } from "../db";
+import { tehranIsoDate } from "../format";
+import { audit } from "./audit";
 import { corporateOrderTransitions, rfqTransitions } from "../status";
 import type {
   CorporateOrder,
@@ -28,6 +30,7 @@ interface RfqRow {
   customization: string | null;
   deadline: string;
   notes: string | null;
+  assigned_to: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +68,7 @@ function hydrate(r: RfqRow): Rfq {
     customization: r.customization,
     deadline: r.deadline,
     notes: r.notes,
+    assignedTo: r.assigned_to,
     items,
     events: listEvents("rfq", r.id),
     createdAt: r.created_at,
@@ -89,7 +93,7 @@ export interface NewRfq {
 
 export function createRfq(input: NewRfq): Rfq {
   const id = newId();
-  const tx = db().transaction(() => {
+  tx(() => {
     const code = uniqueCode(storeRules.rfqCodePrefix, "rfqs");
     const ts = now();
     db()
@@ -107,7 +111,6 @@ export function createRfq(input: NewRfq): Rfq {
     for (const i of input.items) ins.run(id, i.productId, i.name, i.qty, i.unitLabel, JSON.stringify(i.customization), i.note);
     addEvent("rfq", id, "submitted", "استعلام ثبت شد. این درخواست هنوز سفارش یا تعهد خرید نیست.", "customer");
   });
-  tx();
   return getRfqById(id)!;
 }
 
@@ -144,12 +147,33 @@ export function claimRfqsForUser(userId: string, mobile: string) {
   db().prepare("UPDATE meetings SET user_id = ? WHERE user_id IS NULL AND phone = ?").run(userId, mobile);
 }
 
+export class RfqStateError extends Error {}
+
+/**
+ * Manual RFQ transitions by sales. Re-opening (→ in_review) or closing withdraws
+ * any quotation still awaiting the customer, so a withdrawn price can't be accepted.
+ */
 export function transitionRfq(id: string, to: RfqStatus, actor: string, note: string | null = null) {
-  const r = getRfqById(id);
-  if (!r) throw new Error("not found");
-  if (!rfqTransitions[r.status].includes(to)) throw new Error(`invalid transition ${r.status} → ${to}`);
-  db().prepare("UPDATE rfqs SET status = ?, updated_at = ? WHERE id = ?").run(to, now(), id);
-  addEvent("rfq", id, to, note, actor);
+  tx(() => {
+    const r = db().prepare("SELECT status FROM rfqs WHERE id = ?").get(id) as { status: RfqStatus } | undefined;
+    if (!r) throw new RfqStateError("not found");
+    if (!rfqTransitions[r.status].includes(to)) throw new RfqStateError(`invalid transition ${r.status} → ${to}`);
+    if (to === "approved" || to === "converted" || to === "quoted") throw new RfqStateError(`"${to}" is set by the quotation workflow`);
+    const res = db().prepare("UPDATE rfqs SET status = ?, updated_at = ? WHERE id = ? AND status = ?").run(to, now(), id, r.status);
+    if (res.changes !== 1) throw new RfqStateError("RFQ changed concurrently");
+    const withdrawn = db().prepare("UPDATE quotations SET status = 'withdrawn', decided_at = ? WHERE rfq_id = ? AND status = 'issued'").run(now(), id);
+    addEvent("rfq", id, to, note, actor);
+    if (withdrawn.changes) addEvent("rfq", id, "quotation_withdrawn", "پیشنهاد قیمت قبلی برای بازنگری پس گرفته شد.", actor);
+  });
+}
+
+export function assignRfq(id: string, staffMobile: string | null, actor: string) {
+  tx(() => {
+    const before = db().prepare("SELECT assigned_to FROM rfqs WHERE id = ?").get(id) as { assigned_to: string | null } | undefined;
+    if (!before) throw new RfqStateError("not found");
+    db().prepare("UPDATE rfqs SET assigned_to = ?, updated_at = ? WHERE id = ?").run(staffMobile, now(), id);
+    audit(actor, "rfq.assign", "rfq", id, { assignedTo: before.assigned_to }, { assignedTo: staffMobile });
+  });
 }
 
 // ── quotations ──
@@ -192,12 +216,23 @@ const toQuotation = (r: QuotationRow): Quotation => ({
 
 export function listQuotations(rfqId: string): Quotation[] {
   expireQuotations(rfqId);
+
   return (db().prepare("SELECT * FROM quotations WHERE rfq_id = ? ORDER BY version DESC").all(rfqId) as QuotationRow[]).map(toQuotation);
 }
 
-function expireQuotations(rfqId: string) {
-  const today = new Date().toISOString().slice(0, 10);
-  db().prepare("UPDATE quotations SET status = 'expired' WHERE rfq_id = ? AND status = 'issued' AND valid_until < ?").run(rfqId, today);
+/**
+ * Lazy expiry (Tehran calendar date). When the last open quotation expires the
+ * RFQ returns to `in_review`, so it does not sit in "quoted" with nothing to approve.
+ */
+export function expireQuotations(rfqId: string) {
+  tx(() => {
+    const res = db()
+      .prepare("UPDATE quotations SET status = 'expired', decided_at = ? WHERE rfq_id = ? AND status = 'issued' AND valid_until < ?")
+      .run(now(), rfqId, tehranIsoDate());
+    if (!res.changes) return;
+    const back = db().prepare("UPDATE rfqs SET status = 'in_review', updated_at = ? WHERE id = ? AND status = 'quoted'").run(now(), rfqId);
+    if (back.changes) addEvent("rfq", rfqId, "quotation_expired", "اعتبار پیشنهاد قیمت به پایان رسید؛ درخواست برای صدور پیشنهاد جدید به کارشناس بازگشت.", "system");
+  });
 }
 
 export function quotationTotals(lines: QuotationLine[], discount: number) {
@@ -212,42 +247,49 @@ export function issueQuotation(
   input: { lines: QuotationLine[]; discount: number; validUntil: string; deliveryDate: string; terms: string | null },
   actor: string,
 ): Quotation {
+  if (input.lines.length === 0 || input.lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0 || !Number.isInteger(l.unitPrice) || l.unitPrice <= 0)) {
+    throw new RfqStateError("invalid quotation lines");
+  }
+  const t = quotationTotals(input.lines, input.discount);
+  if (!Number.isInteger(input.discount) || input.discount < 0 || input.discount > t.subtotal) throw new RfqStateError("invalid discount");
   const id = newId();
-  const tx = db().transaction(() => {
-    const rfq = getRfqById(rfqId);
-    if (!rfq) throw new Error("not found");
-    if (!["in_review", "quoted", "declined"].includes(rfq.status)) throw new Error("RFQ is not open for quotation");
+  tx(() => {
+    const rfq = db().prepare("SELECT status FROM rfqs WHERE id = ?").get(rfqId) as { status: RfqStatus } | undefined;
+    if (!rfq) throw new RfqStateError("not found");
+    if (!["in_review", "quoted", "declined"].includes(rfq.status)) throw new RfqStateError("RFQ is not open for quotation");
     const prev = db().prepare("SELECT COALESCE(MAX(version),0) v FROM quotations WHERE rfq_id = ?").get(rfqId) as { v: number };
-    db().prepare("UPDATE quotations SET status = 'superseded' WHERE rfq_id = ? AND status = 'issued'").run(rfqId);
-    const t = quotationTotals(input.lines, input.discount);
+    db().prepare("UPDATE quotations SET status = 'superseded', decided_at = ? WHERE rfq_id = ? AND status = 'issued'").run(now(), rfqId);
     db()
       .prepare(
         `INSERT INTO quotations (id, rfq_id, version, status, lines, subtotal, discount, vat, total, valid_until, delivery_date, terms, proforma_number, created_at, decided_at)
          VALUES (?, ?, ?, 'issued', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)`,
       )
       .run(id, rfqId, prev.v + 1, JSON.stringify(input.lines), t.subtotal, t.discount, t.vat, t.total, input.validUntil, input.deliveryDate, input.terms, now());
-    if (rfq.status !== "quoted") {
-      db().prepare("UPDATE rfqs SET status = 'quoted', updated_at = ? WHERE id = ?").run(now(), rfqId);
-    }
+    db().prepare("UPDATE rfqs SET status = 'quoted', updated_at = ? WHERE id = ? AND status = ?").run(now(), rfqId, rfq.status);
     addEvent("rfq", rfqId, "quoted", `پیشنهاد قیمت نسخهٔ ${(prev.v + 1).toLocaleString("fa-IR")} صادر شد.`, actor);
+    audit(actor, "quotation.issue", "rfq", rfqId, null, { quotationId: id, version: prev.v + 1, total: t.total });
   });
-  tx();
   return toQuotation(db().prepare("SELECT * FROM quotations WHERE id = ?").get(id) as QuotationRow);
 }
 
-/** Customer decision. Approval issues a pro forma invoice number; it is still not a confirmed order. */
+/**
+ * Customer decision. Requires the quotation to be the open one AND the RFQ to be
+ * in `quoted`; both are re-checked under the write lock. Approval issues a pro
+ * forma number — it is still not a confirmed order. Identity of the approver is
+ * enforced by the caller (services/corporate.ts).
+ */
 export function decideQuotation(quotationId: string, decision: "approved" | "declined", actor: string, note: string | null) {
-  const tx = db().transaction(() => {
-    const q = db().prepare("SELECT * FROM quotations WHERE id = ?").get(quotationId) as QuotationRow | undefined;
-    if (!q) throw new Error("not found");
-    expireQuotations(q.rfq_id);
-    const fresh = db().prepare("SELECT status FROM quotations WHERE id = ?").get(quotationId) as { status: string };
-    if (fresh.status !== "issued") throw new Error("quotation is not awaiting a decision");
+  const q0 = db().prepare("SELECT rfq_id FROM quotations WHERE id = ?").get(quotationId) as { rfq_id: string } | undefined;
+  if (!q0) throw new RfqStateError("not found");
+  expireQuotations(q0.rfq_id);
+  tx(() => {
     const proforma = decision === "approved" ? uniqueCode(storeRules.proformaPrefix, "quotations", "proforma_number") : null;
-    db()
-      .prepare("UPDATE quotations SET status = ?, proforma_number = ?, decided_at = ? WHERE id = ?")
-      .run(decision, proforma, now(), quotationId);
-    db().prepare("UPDATE rfqs SET status = ?, updated_at = ? WHERE id = ?").run(decision, now(), q.rfq_id);
+    const q = db()
+      .prepare("UPDATE quotations SET status = ?, proforma_number = ?, decided_at = ? WHERE id = ? AND status = 'issued' RETURNING rfq_id")
+      .get(decision, proforma, now(), quotationId) as { rfq_id: string } | undefined;
+    if (!q) throw new RfqStateError("quotation is not awaiting a decision");
+    const r = db().prepare("UPDATE rfqs SET status = ?, updated_at = ? WHERE id = ? AND status = 'quoted'").run(decision, now(), q.rfq_id);
+    if (r.changes !== 1) throw new RfqStateError("RFQ is not awaiting a decision");
     addEvent(
       "rfq",
       q.rfq_id,
@@ -255,8 +297,8 @@ export function decideQuotation(quotationId: string, decision: "approved" | "dec
       decision === "approved" ? `پیشنهاد قیمت تأیید شد و پیش‌فاکتور ${proforma} صادر شد.${note ? ` — ${note}` : ""}` : `پیشنهاد قیمت رد شد.${note ? ` دلیل: ${note}` : ""}`,
       actor,
     );
+    audit(actor, `quotation.${decision}`, "rfq", q.rfq_id, null, { quotationId, proforma });
   });
-  tx();
 }
 
 // ── corporate orders ──
@@ -283,25 +325,24 @@ const toCo = (r: CoRow): CorporateOrder => ({
   createdAt: r.created_at,
 });
 
-/** Sales confirms the order once payment or a purchase order against the pro forma is received. */
+/** Finance confirms the order once payment or a purchase order against the pro forma is received. */
 export function confirmCorporateOrder(rfqId: string, reference: string, actor: string): CorporateOrder {
+  const ref = reference.trim();
+  if (!/^[\p{L}\p{N}\-_/ ]{3,64}$/u.test(ref)) throw new RfqStateError("invalid reference");
   const id = newId();
-  const tx = db().transaction(() => {
-    const rfq = getRfqById(rfqId);
-    if (!rfq || rfq.status !== "approved") throw new Error("RFQ has no approved quotation");
-    const q = db().prepare("SELECT * FROM quotations WHERE rfq_id = ? AND status = 'approved' ORDER BY version DESC LIMIT 1").get(rfqId) as
-      | QuotationRow
-      | undefined;
-    if (!q) throw new Error("no approved quotation");
+  tx(() => {
+    const q = db().prepare("SELECT * FROM quotations WHERE rfq_id = ? AND status = 'approved' ORDER BY version DESC LIMIT 1").get(rfqId) as QuotationRow | undefined;
+    if (!q) throw new RfqStateError("no approved quotation");
+    const r = db().prepare("UPDATE rfqs SET status = 'converted', updated_at = ? WHERE id = ? AND status = 'approved'").run(now(), rfqId);
+    if (r.changes !== 1) throw new RfqStateError("RFQ has no approved quotation awaiting confirmation");
     const code = uniqueCode(storeRules.corporateOrderPrefix, "corporate_orders");
     db()
       .prepare("INSERT INTO corporate_orders (id, code, rfq_id, quotation_id, status, total, reference, created_at) VALUES (?, ?, ?, ?, 'confirmed', ?, ?, ?)")
-      .run(id, code, rfqId, q.id, q.total, reference, now());
-    db().prepare("UPDATE rfqs SET status = 'converted', updated_at = ? WHERE id = ?").run(now(), rfqId);
-    addEvent("rfq", rfqId, "converted", `سفارش قطعی ${code} ثبت شد (مرجع پرداخت/سفارش خرید: ${reference}).`, actor);
+      .run(id, code, rfqId, q.id, q.total, ref, now());
+    addEvent("rfq", rfqId, "converted", `سفارش قطعی ${code} ثبت شد (مرجع پرداخت/سفارش خرید: ${ref}).`, actor);
     addEvent("corporate_order", id, "confirmed", null, actor);
+    audit(actor, "corporate_order.confirm", "rfq", rfqId, null, { corporateOrderId: id, code, reference: ref, total: q.total });
   });
-  tx();
   return toCo(db().prepare("SELECT * FROM corporate_orders WHERE id = ?").get(id) as CoRow);
 }
 
@@ -324,9 +365,12 @@ export function listCorporateOrders(userId?: string): (CorporateOrder & { rfqCod
 }
 
 export function transitionCorporateOrder(id: string, to: CorporateOrderStatus, actor: string) {
-  const r = db().prepare("SELECT * FROM corporate_orders WHERE id = ?").get(id) as CoRow | undefined;
-  if (!r) throw new Error("not found");
-  if (!corporateOrderTransitions[r.status].includes(to)) throw new Error("invalid transition");
-  db().prepare("UPDATE corporate_orders SET status = ? WHERE id = ?").run(to, id);
-  addEvent("corporate_order", id, to, null, actor);
+  tx(() => {
+    const r = db().prepare("SELECT status FROM corporate_orders WHERE id = ?").get(id) as { status: CorporateOrderStatus } | undefined;
+    if (!r) throw new RfqStateError("not found");
+    if (!corporateOrderTransitions[r.status].includes(to)) throw new RfqStateError("invalid transition");
+    const res = db().prepare("UPDATE corporate_orders SET status = ? WHERE id = ? AND status = ?").run(to, id, r.status);
+    if (res.changes !== 1) throw new RfqStateError("changed concurrently");
+    addEvent("corporate_order", id, to, null, actor);
+  });
 }

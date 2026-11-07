@@ -100,6 +100,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* <fieldset> defaults to min-inline-size: min-content, which lets horizontally
+   scrolling chip/day rows push the page wider than the phone viewport. */
+fieldset {
+  min-width: 0;
+  min-inline-size: 0;
+}
+
 :focus-visible {
   outline: 2px solid var(--acc-600);
   outline-offset: 2px;

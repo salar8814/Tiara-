@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { issueQuotationAction, saveProductAction, saveVariantAction, type AdminFormState } from "@/app/actions/admin";
+import { adjustStockAction, issueQuotationAction, savePricingAction, saveProductAction, type AdminFormState } from "@/app/actions/admin";
 import { faNum, toLatinDigits, toman } from "@/lib/format";
 import type { B2BConfig, RfqItem, Variant } from "@/lib/types";
 import { useState } from "react";
@@ -9,27 +9,47 @@ import { Button, Field, Input, Notice, Textarea } from "./ui";
 
 const small = "h-9 w-full rounded border border-line-strong bg-surface px-2 text-end text-sm num focus:border-indigo-600 focus:outline-none";
 
-export function VariantRow({ v }: { v: Variant }) {
-  const [state, action, pending] = useActionState<AdminFormState, FormData>(saveVariantAction, {});
+/**
+ * Prices and stock are separate forms with separate permissions (catalog.edit vs
+ * inventory.adjust). Stock is changed by a signed delta with a reason, never by
+ * overwriting the number, so reservations made while the form was open are kept.
+ */
+export function VariantRow({ v, canPrice, canStock }: { v: Variant; canPrice: boolean; canStock: boolean }) {
+  const [pState, pricing, pPending] = useActionState<AdminFormState, FormData>(savePricingAction, {});
+  const [sState, stock, sPending] = useActionState<AdminFormState, FormData>(adjustStockAction, {});
   return (
-    <form action={action} className="grid grid-cols-2 items-end gap-2 py-3 sm:grid-cols-[1.4fr_1fr_1fr_.7fr_.7fr_auto]">
-      <input type="hidden" name="id" value={v.id} />
-      <div className="col-span-2 sm:col-span-1">
-        <p className="text-sm font-semibold text-ink">{v.label}</p>
-        <p className="ltr text-end text-xs text-subtle sm:text-start">{v.sku}</p>
+    <div className="grid gap-3 py-3 lg:grid-cols-[1fr_auto]">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-32 flex-1">
+          <p className="text-sm font-semibold text-ink">{v.label}</p>
+          <p className="ltr text-start text-xs text-subtle">{v.sku}</p>
+        </div>
+        <form action={pricing} className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="id" value={v.id} />
+          <label className="w-32 text-xs text-muted">قیمت مصرف‌کننده<input name="retailPrice" defaultValue={v.retailPrice} inputMode="numeric" className={small} dir="ltr" disabled={!canPrice} /></label>
+          <label className="w-32 text-xs text-muted">قیمت کارکنان<input name="employeePrice" defaultValue={v.employeePrice} inputMode="numeric" className={small} dir="ltr" disabled={!canPrice} /></label>
+          <label className="w-20 text-xs text-muted">سقف/سفارش<input name="maxPerOrder" defaultValue={v.maxPerOrder} inputMode="numeric" className={small} dir="ltr" disabled={!canPrice} /></label>
+          {canPrice && <Button size="sm" variant="secondary" disabled={pPending}>{pPending ? "…" : "ذخیرهٔ قیمت"}</Button>}
+        </form>
       </div>
-      <label className="text-xs text-muted">قیمت مصرف‌کننده<input name="retailPrice" defaultValue={v.retailPrice} inputMode="numeric" className={small} dir="ltr" /></label>
-      <label className="text-xs text-muted">قیمت کارکنان<input name="employeePrice" defaultValue={v.employeePrice} inputMode="numeric" className={small} dir="ltr" /></label>
-      <label className="text-xs text-muted">موجودی<input name="stock" defaultValue={v.stock} inputMode="numeric" className={small} dir="ltr" /></label>
-      <label className="text-xs text-muted">سقف/سفارش<input name="maxPerOrder" defaultValue={v.maxPerOrder} inputMode="numeric" className={small} dir="ltr" /></label>
-      <div className="col-span-2 flex items-center gap-2 sm:col-span-1">
-        <Button size="sm" variant="secondary" disabled={pending}>{pending ? "…" : "ذخیره"}</Button>
-        <span aria-live="polite" className="text-xs">
-          {state.ok && <span className="font-semibold text-success">ذخیره شد</span>}
-          {state.error && <span className="font-semibold text-danger">{state.error}</span>}
-        </span>
-      </div>
-    </form>
+      <form action={stock} className="flex flex-wrap items-end gap-2">
+        <input type="hidden" name="id" value={v.id} />
+        <p className="text-xs text-muted">موجودی<span className="num block text-base font-bold text-ink">{faNum(v.stock)}</span></p>
+        {canStock && (
+          <>
+            <label className="w-20 text-xs text-muted">تغییر (±)<input name="delta" placeholder="+۲۰" inputMode="numeric" className={small} dir="ltr" /></label>
+            <label className="w-44 text-xs text-muted">دلیل<input name="note" placeholder="رسید انبار / شمارش" className="h-9 w-full rounded border border-line-strong bg-surface px-2 text-sm" /></label>
+            <Button size="sm" variant="secondary" disabled={sPending}>{sPending ? "…" : "ثبت"}</Button>
+          </>
+        )}
+      </form>
+      <p aria-live="polite" className="text-xs lg:col-span-2">
+        {pState.ok && <span className="font-semibold text-success">قیمت ذخیره شد. </span>}
+        {pState.error && <span className="font-semibold text-danger">{pState.error} </span>}
+        {sState.ok && <span className="font-semibold text-success">موجودی ثبت شد.</span>}
+        {sState.error && <span className="font-semibold text-danger">{sState.error}</span>}
+      </p>
+    </div>
   );
 }
 

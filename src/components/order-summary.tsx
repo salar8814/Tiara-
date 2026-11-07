@@ -7,6 +7,8 @@ import { KeyValue, Money } from "./ui";
 export const orderEventLabels: Record<string, string> = {
   ...Object.fromEntries(Object.entries(orderStatus).map(([k, v]) => [k, v.label])),
   payment_failed: "پرداخت ناموفق",
+  refund_pending: "در انتظار بازگشت وجه",
+  refunded: "وجه بازگردانده شد",
   pending_payment: "سفارش ثبت شد",
 };
 

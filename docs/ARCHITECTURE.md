@@ -99,3 +99,17 @@ The server recomputes everything on submission: prices, stock, caps, MOQ/step an
 ## Data model
 
 `products` (with a `b2b` JSON block) · `variants` · `hr_directory` (demo) · `users` · `otp_codes` · `sessions` · `addresses` · `orders` / `order_items` · `rfqs` / `rfq_items` · `quotations` (versioned, with `proforma_number`) · `corporate_orders` · `meetings` · `events` (a shared audit timeline for orders, RFQs, meetings and corporate orders).
+
+## Changes from the hardening pass
+
+See ARCHITECTURE_DECISIONS.md for the reasoning behind each of these.
+
+- **Staff roles** replace the single admin flag: `staff_roles` with admin, sales, finance and warehouse. Permissions are defined in `src/lib/authz.ts` and enforced in `src/lib/services/admin.ts`.
+- **Stock** changes only through `src/lib/repo/inventory.ts` (delta plus an append-only `inventory_movements` ledger).
+- **Every state change** is a guarded conditional UPDATE in a `BEGIN IMMEDIATE` transaction (`tx()`).
+- **Schema** is versioned in `src/lib/migrations.ts`. v2 adds triggers for status enums, unique indexes, `audit_log`, `rate_limits` and the idempotency, refund and assignment columns.
+- **New statuses:**
+  - payment: `refund_pending`, `refunded`
+  - quotation: `withdrawn`
+  - RFQs can now have a sales owner (`assigned_to`).
+- **Environment gating:** `TIARA_ENV` (`src/lib/config.ts`), with startup validation in `src/instrumentation.ts`.

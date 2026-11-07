@@ -75,7 +75,7 @@ export default async function ShopPage({ searchParams }: { searchParams: SP }) {
       <EligibilityBanner user={user} />
 
       <FilterForm className="group mt-6">
-        <fieldset className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <fieldset className="relative -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
           <legend className="sr-only">دسته‌بندی</legend>
           <div className="flex gap-2 pb-1">
             {[{ id: "", name: "همه", count: all.length }, ...shopCats.map((c) => ({ id: c.id, name: c.name, count: counts.get(c.id)! }))].map((c) => (
@@ -129,6 +129,8 @@ export default async function ShopPage({ searchParams }: { searchParams: SP }) {
             <span className="ms-2 hidden text-xs group-data-[pending]:inline">در حال به‌روزرسانی…</span>
           </p>
           {activeFilters > 0 && (
+            // Full reload on purpose: it resets the uncontrolled filter inputs (keying the form would steal focus while typing).
+            // eslint-disable-next-line @next/next/no-html-link-for-pages
             <a href="/shop" className="font-semibold text-indigo-700 hover:underline">پاک کردن فیلترها</a>
           )}
         </div>

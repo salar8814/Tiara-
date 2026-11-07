@@ -24,40 +24,41 @@ export function AddressForm({
     }
   }, [state, onSaved]);
   const e = state.errors ?? {};
+  const val = (k: string, fallback = "") => state.values?.[k] ?? fallback;
 
   return (
     <form action={action} className="grid gap-4 sm:grid-cols-2" noValidate>
       {e._ && <Notice tone="danger" className="sm:col-span-2">{e._}</Notice>}
       <Field label="نام گیرنده" htmlFor="a-recipient" error={e.recipient} required>
-        <Input id="a-recipient" name="recipient" autoComplete="name" defaultValue={defaults?.recipient ?? ""} invalid={!!e.recipient} />
+        <Input id="a-recipient" name="recipient" autoComplete="name" defaultValue={val("recipient", defaults?.recipient ?? "")} invalid={!!e.recipient} />
       </Field>
       <Field label="شمارهٔ همراه گیرنده" htmlFor="a-mobile" error={e.mobile} required>
-        <Input id="a-mobile" name="mobile" inputMode="tel" autoComplete="tel" dir="ltr" className="text-end" placeholder="۰۹۱۲ ۳۴۵ ۶۷۸۹" defaultValue={defaults?.mobile ?? ""} invalid={!!e.mobile} />
+        <Input id="a-mobile" name="mobile" inputMode="tel" autoComplete="tel" dir="ltr" className="text-end" placeholder="۰۹۱۲ ۳۴۵ ۶۷۸۹" defaultValue={val("mobile", defaults?.mobile ?? "")} invalid={!!e.mobile} />
       </Field>
       <Field label="استان" htmlFor="a-province" error={e.province} required>
-        <Select id="a-province" name="province" defaultValue="تهران" invalid={!!e.province}>
+        <Select key={val("province", "تهران")} id="a-province" name="province" defaultValue={val("province", "تهران")} invalid={!!e.province}>
           {provinces.map((p) => <option key={p}>{p}</option>)}
         </Select>
       </Field>
       <Field label="شهر" htmlFor="a-city" error={e.city} required>
-        <Input id="a-city" name="city" defaultValue="تهران" autoComplete="address-level2" invalid={!!e.city} />
+        <Input id="a-city" name="city" defaultValue={val("city", "تهران")} autoComplete="address-level2" invalid={!!e.city} />
       </Field>
       <Field label="نشانی پستی" htmlFor="a-street" error={e.street} hint="خیابان، کوچه و نشانه‌های لازم" required className="sm:col-span-2">
-        <Textarea id="a-street" name="street" rows={2} autoComplete="street-address" invalid={!!e.street} />
+        <Textarea id="a-street" name="street" rows={2} defaultValue={val("street")} autoComplete="street-address" invalid={!!e.street} />
       </Field>
       <div className="grid grid-cols-2 gap-4">
         <Field label="پلاک" htmlFor="a-plaque" error={e.plaque} required>
-          <Input id="a-plaque" name="plaque" inputMode="numeric" invalid={!!e.plaque} />
+          <Input id="a-plaque" name="plaque" inputMode="numeric" defaultValue={val("plaque")} invalid={!!e.plaque} />
         </Field>
         <Field label="واحد" htmlFor="a-unit" error={e.unit}>
-          <Input id="a-unit" name="unit" inputMode="numeric" invalid={!!e.unit} />
+          <Input id="a-unit" name="unit" inputMode="numeric" defaultValue={val("unit")} invalid={!!e.unit} />
         </Field>
       </div>
       <Field label="کد پستی" htmlFor="a-postal" error={e.postalCode} hint="۱۰ رقم، بدون خط تیره" required>
-        <Input id="a-postal" name="postalCode" inputMode="numeric" dir="ltr" className="text-end" maxLength={12} autoComplete="postal-code" invalid={!!e.postalCode} />
+        <Input id="a-postal" name="postalCode" inputMode="numeric" defaultValue={val("postalCode")} dir="ltr" className="text-end" maxLength={12} autoComplete="postal-code" invalid={!!e.postalCode} />
       </Field>
       <Field label="عنوان نشانی" htmlFor="a-label" hint="مثلاً خانه یا محل کار">
-        <Input id="a-label" name="label" defaultValue="خانه" />
+        <Input id="a-label" name="label" defaultValue={val("label", "خانه")} />
       </Field>
       <label className="flex items-center gap-2 self-end pb-3 text-sm text-ink-soft">
         <input type="checkbox" name="makeDefault" className="size-4 accent-indigo-600" /> نشانی پیش‌فرض باشد

@@ -14,6 +14,7 @@ import { getProductById } from "@/lib/repo/products";
 import { listCorporateOrders, listRfqs } from "@/lib/repo/rfqs";
 import { listAddresses } from "@/lib/repo/users";
 import { requireUser } from "@/lib/session";
+import { staffRoleLabels } from "@/lib/authz";
 import { corporateOrderStatus, eligibilityLabel, meetingStatus, orderStatus, rfqStatus } from "@/lib/status";
 import type { Rfq } from "@/lib/types";
 
@@ -58,14 +59,14 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
       <PageHeader
         crumbs={[{ href: "/", label: "دنیای تیارا" }, { label: "حساب من" }]}
         title={user.name ? `سلام، ${user.name}` : "حساب من"}
-        lead={<span className="flex flex-wrap items-center gap-2"><span className="ltr">{user.mobile}</span><Badge tone={el.tone}>{el.label}</Badge>{user.role === "admin" && <Badge tone="brand">مدیر سامانه</Badge>}</span>}
+        lead={<span className="flex flex-wrap items-center gap-2"><span className="ltr">{user.mobile}</span><Badge tone={el.tone}>{el.label}</Badge>{user.staffRoles.map((r) => <Badge key={r} tone="brand">{staffRoleLabels[r]}</Badge>)}</span>}
         action={
           <form action={logoutAction}>
             <button className="flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold text-muted hover:bg-sunken hover:text-ink"><Icon name="logout" size={16} /> خروج</button>
           </form>
         }
       />
-      {sp.denied === "admin" && <Notice tone="danger" className="mb-4">دسترسی به پنل مدیریت فقط برای نقش مدیر فعال است.</Notice>}
+      {sp.denied === "admin" && <Notice tone="danger" className="mb-4">دسترسی به پنل مدیریت فقط برای کارکنان تیارا با نقش تعریف‌شده امکان‌پذیر است.</Notice>}
 
       <nav aria-label="بخش‌های حساب" className="-mx-4 mb-6 overflow-x-auto border-b border-line px-4 sm:mx-0 sm:px-0">
         <ul className="flex gap-1">
